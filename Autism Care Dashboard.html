@@ -1,0 +1,3350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://accounts.google.com https://www.googleapis.com; script-src 'self' 'unsafe-inline' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://accounts.google.com https://www.googleapis.com https://oauth2.googleapis.com;">
+<title>Autism Care Dashboard</title>
+
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║             AUTISM CARE DASHBOARD  – v1.2                   ║
+  ║  Private family-use app. Not for diagnosis or treatment.    ║
+  ║  Metadata: localStorage  |  File blobs: IndexedDB           ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+  STRUCTURE
+  ─────────
+  1.  CSS Custom Properties + Reset
+  2.  Layout: nav sidebar + main content area
+  3.  Section renderers (one per tab):
+        home | profile | appointments | therapy |
+        behavior | communication | dailylog | documents |
+        report | settings
+  4.  Modal system (shared add/edit forms)
+  5.  Data layer – metadata in localStorage, file blobs in IndexedDB
+  6.  Boot / routing logic
+-->
+
+<style>
+/* ─────────────────────────────────────────────
+   1. TOKENS & RESET
+───────────────────────────────────────────── */
+:root {
+  /* Palette – warm sage + soft sky + cream */
+  --bg:          #F7F5F0;
+  --surface:     #FFFFFF;
+  --surface-2:   #EEF3F0;
+  --border:      #D8E2DB;
+  --accent:      #5A8A72;       /* sage green */
+  --accent-lt:   #A8CBB8;
+  --accent-pale: #E4F0EA;
+  --sky:         #7BAEC2;
+  --sky-pale:    #E2F0F6;
+  --warm:        #C97B4B;       /* muted terracotta – sparingly */
+  --warm-pale:   #FAF0E8;
+  --text:        #2C3830;
+  --text-2:      #5A6B61;
+  --text-3:      #8A9E92;
+  --danger:      #C0392B;
+  --danger-pale: #FDECEA;
+  --radius:      14px;
+  --radius-sm:   8px;
+  --shadow:      0 2px 12px rgba(44,56,48,.08);
+  --shadow-md:   0 4px 24px rgba(44,56,48,.13);
+  --font:        'Segoe UI', system-ui, -apple-system, sans-serif;
+  --nav-w:       220px;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.55;
+}
+a { color: var(--accent); }
+button { font-family: inherit; cursor: pointer; }
+input, textarea, select {
+  font-family: inherit;
+  font-size: 1rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .55rem .8rem;
+  background: var(--surface);
+  color: var(--text);
+  width: 100%;
+  transition: border-color .15s;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-pale);
+}
+textarea { resize: vertical; min-height: 80px; }
+label { display: block; font-size: .875rem; font-weight: 600; color: var(--text-2); margin-bottom: .3rem; }
+h1,h2,h3,h4 { line-height: 1.25; }
+
+/* ─────────────────────────────────────────────
+   2. LAYOUT
+───────────────────────────────────────────── */
+#app { display: flex; min-height: 100vh; }
+
+/* Sidebar nav */
+#nav {
+  width: var(--nav-w);
+  background: var(--surface);
+  border-right: 1.5px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 100;
+  overflow-y: auto;
+  transition: transform .25s ease;
+}
+#nav-logo {
+  padding: 1.25rem 1rem 1rem;
+  border-bottom: 1.5px solid var(--border);
+}
+#nav-logo .logo-icon { font-size: 1.8rem; }
+#nav-logo h1 { font-size: 1rem; color: var(--accent); font-weight: 700; line-height: 1.2; margin-top: .25rem; }
+#nav-logo p { font-size: .72rem; color: var(--text-3); margin-top: .1rem; }
+
+#child-badge {
+  margin: .75rem 1rem;
+  background: var(--accent-pale);
+  border-radius: var(--radius-sm);
+  padding: .6rem .8rem;
+  font-size: .85rem;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  text-align: left;
+  width: calc(100% - 2rem);
+}
+#child-badge span { display: block; font-size: .7rem; font-weight: 400; color: var(--text-3); margin-top: .1rem; }
+
+#nav-links { padding: .5rem 0; flex: 1; }
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  padding: .7rem 1.1rem;
+  font-size: .9rem;
+  color: var(--text-2);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  border-radius: 0;
+  transition: background .12s, color .12s;
+  font-weight: 500;
+}
+.nav-item .ni { font-size: 1.1rem; width: 1.5rem; flex-shrink: 0; }
+.nav-item:hover { background: var(--surface-2); color: var(--text); }
+.nav-item.active { background: var(--accent-pale); color: var(--accent); font-weight: 700; }
+
+/* Hamburger */
+#hamburger {
+  display: none;
+  position: fixed;
+  top: 12px; left: 12px;
+  z-index: 200;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .45rem .6rem;
+  font-size: 1.3rem;
+  line-height: 1;
+  box-shadow: var(--shadow);
+}
+#nav-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.3);
+  z-index: 90;
+}
+
+/* Main content */
+#main {
+  margin-left: var(--nav-w);
+  flex: 1;
+  padding: 2rem 2rem 3rem;
+  max-width: 960px;
+}
+
+/* ─────────────────────────────────────────────
+   3. COMPONENTS
+───────────────────────────────────────────── */
+.page { display: none; }
+.page.active { display: block; }
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.page-header h2 { font-size: 1.5rem; color: var(--text); }
+.page-header p  { font-size: .875rem; color: var(--text-3); margin-top: .15rem; }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .6rem 1.1rem;
+  border-radius: var(--radius-sm);
+  font-size: .9rem;
+  font-weight: 600;
+  border: none;
+  transition: filter .15s, transform .1s;
+  cursor: pointer;
+}
+.btn:active { transform: scale(.97); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-sky { background: var(--sky); color: #fff; }
+.btn-sky:hover { filter: brightness(1.08); }
+.btn-warm { background: var(--warm); color: #fff; }
+.btn-ghost {
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1.5px solid var(--border);
+}
+.btn-ghost:hover { background: var(--border); }
+.btn-danger { background: var(--danger-pale); color: var(--danger); border: 1.5px solid #f5c6c2; }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+.btn-sm { padding: .45rem .85rem; font-size: .8rem; min-height: 36px; }
+.btn-lg { padding: .8rem 1.4rem; font-size: 1rem; }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  box-shadow: var(--shadow);
+  border: 1.5px solid var(--border);
+}
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--accent);
+}
+.stat-card.sky  { border-left-color: var(--sky); }
+.stat-card.warm { border-left-color: var(--warm); }
+.stat-card.green { border-left-color: var(--accent); }
+.stat-card .stat-val { font-size: 1.6rem; font-weight: 700; color: var(--text); }
+.stat-card .stat-lbl { font-size: .78rem; color: var(--text-3); margin-top: .1rem; }
+.stat-card .stat-sub { font-size: .8rem; color: var(--text-2); margin-top: .25rem; }
+
+/* Quick-action buttons on home */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: .75rem;
+  margin-bottom: 1.5rem;
+}
+.quick-btn {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: .9rem .8rem;
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow .15s, border-color .15s;
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.quick-btn:hover { box-shadow: var(--shadow-md); border-color: var(--accent-lt); color: var(--accent); }
+.quick-btn .qb-icon { font-size: 1.5rem; display: block; margin-bottom: .35rem; }
+
+/* Section title */
+.section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin: 1.5rem 0 .75rem;
+}
+
+/* List items */
+.item-list { display: flex; flex-direction: column; gap: .6rem; }
+.item-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: .85rem 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: .75rem;
+}
+.item-card .item-main { flex: 1; min-width: 0; }
+.item-card .item-title { font-weight: 600; font-size: .95rem; }
+.item-card .item-sub  { font-size: .8rem; color: var(--text-3); margin-top: .2rem; }
+.item-card .item-actions { display: flex; gap: .4rem; flex-shrink: 0; }
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: .15rem .55rem;
+  border-radius: 20px;
+  font-size: .72rem;
+  font-weight: 700;
+}
+.badge-green { background: var(--accent-pale); color: var(--accent); }
+.badge-sky   { background: var(--sky-pale); color: var(--sky); }
+.badge-warm  { background: var(--warm-pale); color: var(--warm); }
+.badge-gray  { background: var(--surface-2); color: var(--text-3); }
+
+/* Intensity dots */
+.intensity { display: inline-flex; gap: 3px; }
+.intensity span {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--border);
+  display: inline-block;
+}
+.intensity span.on { background: var(--warm); }
+
+/* Form helpers */
+.form-row { margin-bottom: 1rem; }
+.form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-bottom: 1rem; }
+.form-hint { font-size: .75rem; color: var(--text-3); margin-top: .2rem; }
+.form-section-title { font-size: .8rem; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin: 1.2rem 0 .6rem; }
+
+/* ─────────────────────────────────────────────
+   MODAL
+───────────────────────────────────────────── */
+#modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+#modal-overlay.open { display: flex; }
+#modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+}
+#modal-header {
+  padding: 1.1rem 1.4rem .9rem;
+  border-bottom: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+#modal-header h3 { font-size: 1.1rem; }
+#modal-close {
+  background: var(--surface-2);
+  border: none;
+  border-radius: 50%;
+  width: 32px; height: 32px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2);
+}
+#modal-body { padding: 1.2rem 1.4rem 1.4rem; }
+#modal-footer {
+  padding: .9rem 1.4rem;
+  border-top: 1.5px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: .6rem;
+}
+
+/* ─────────────────────────────────────────────
+   PROFILE GRID
+───────────────────────────────────────────── */
+.profile-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+.profile-field { border-bottom: 1px solid var(--border); padding-bottom: .75rem; }
+.profile-field .pf-label { font-size: .75rem; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .05em; }
+.profile-field .pf-val { font-size: .95rem; color: var(--text); margin-top: .2rem; }
+.profile-field .pf-val.empty { color: var(--text-3); font-style: italic; }
+@media (max-width: 600px) { .profile-grid { grid-template-columns: 1fr; } }
+
+/* ─────────────────────────────────────────────
+   BEHAVIOR SUMMARY
+───────────────────────────────────────────── */
+.summary-pills { display: flex; flex-wrap: wrap; gap: .4rem; }
+.pill {
+  background: var(--accent-pale);
+  color: var(--accent);
+  border-radius: 20px;
+  padding: .25rem .7rem;
+  font-size: .8rem;
+  font-weight: 600;
+}
+.pill.sky { background: var(--sky-pale); color: var(--sky); }
+
+/* ─────────────────────────────────────────────
+   REPORT / PRINT
+───────────────────────────────────────────── */
+@media print {
+  #nav, #hamburger, #nav-overlay, #modal-overlay, .btn, .item-actions { display: none !important; }
+  #main { margin: 0; padding: 1rem; max-width: 100%; }
+  body { background: #fff; }
+  .card, .item-card { box-shadow: none; border: 1px solid #ccc; }
+  .page { display: block !important; }
+  .page:not(#page-report) { display: none !important; }
+}
+
+/* ─────────────────────────────────────────────
+   DOCUMENT CATEGORY SECTIONS (collapsible)
+───────────────────────────────────────────── */
+.doc-section {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: .85rem;
+  background: var(--surface);
+  overflow: hidden;
+}
+.doc-section-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .9rem 1.1rem;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface);
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background .12s;
+}
+.doc-section-header:hover { background: var(--surface-2); }
+.doc-section-header .dsh-icon  { font-size: 1.3rem; flex-shrink: 0; }
+.doc-section-header .dsh-title { font-weight: 700; font-size: .95rem; flex: 1; }
+.doc-section-header .dsh-count {
+  font-size: .75rem; font-weight: 600;
+  background: var(--surface-2); color: var(--text-3);
+  border-radius: 20px; padding: .15rem .55rem;
+}
+.doc-section-header .dsh-add {
+  font-size: .78rem; font-weight: 600;
+  background: var(--accent-pale); color: var(--accent);
+  border: 1.5px solid var(--accent-lt);
+  border-radius: 20px; padding: .2rem .65rem;
+  cursor: pointer; white-space: nowrap;
+  transition: background .12s;
+}
+.doc-section-header .dsh-add:hover { background: var(--accent); color: #fff; }
+.doc-section-header .dsh-chevron {
+  font-size: .75rem; color: var(--text-3);
+  transition: transform .2s ease;
+  flex-shrink: 0;
+}
+.doc-section.open .dsh-chevron { transform: rotate(180deg); }
+.doc-section-body {
+  display: none;
+  border-top: 1.5px solid var(--border);
+  padding: .75rem 1rem;
+}
+.doc-section.open .doc-section-body { display: block; }
+
+/* ─────────────────────────────────────────────
+   DOCUMENT UPLOAD AREA
+───────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed var(--accent-lt);
+  border-radius: var(--radius);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+  background: var(--accent-pale);
+  color: var(--text-2);
+  margin-bottom: 1.25rem;
+}
+.drop-zone.drag-over {
+  background: #d0e8da;
+  border-color: var(--accent);
+}
+.drop-zone .dz-icon { font-size: 2rem; display: block; margin-bottom: .4rem; }
+.drop-zone p { font-size: .875rem; margin-bottom: .5rem; }
+.drop-zone input[type=file] { display: none; }
+
+.file-preview {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .75rem 1rem;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  margin-top: .6rem;
+}
+.file-preview .fp-icon { font-size: 1.6rem; flex-shrink: 0; }
+.file-preview .fp-info { flex: 1; min-width: 0; }
+.file-preview .fp-name { font-size: .875rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-preview .fp-size { font-size: .75rem; color: var(--text-3); }
+.file-preview .fp-remove { background: none; border: none; color: var(--danger); font-size: 1.1rem; cursor: pointer; flex-shrink: 0; }
+
+/* Doc card file area */
+.doc-file-row {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: .4rem;
+  flex-wrap: wrap;
+}
+.doc-thumb {
+  width: 48px; height: 48px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+  border: 1.5px solid var(--border);
+  cursor: pointer;
+}
+.doc-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .3rem .7rem;
+  border-radius: 20px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background .12s;
+}
+.doc-file-chip:hover { background: var(--accent-pale); color: var(--accent); border-color: var(--accent-lt); }
+
+/* Storage meter */
+#storage-bar-wrap {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 8px;
+  margin: .5rem 0 .25rem;
+}
+#storage-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  transition: width .4s ease;
+}
+#storage-bar.warn { background: var(--warm); }
+#storage-bar.danger { background: var(--danger); }
+
+/* Image lightbox */
+#lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.85);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+#lightbox.open { display: flex; }
+#lightbox img {
+  max-width: 100%;
+  max-height: 90vh;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+#lightbox-close {
+  position: absolute;
+  top: 1rem; right: 1rem;
+  background: rgba(255,255,255,.15);
+  border: none;
+  color: #fff;
+  font-size: 1.5rem;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+
+#disclaimer {
+  background: var(--sky-pale);
+  border: 1.5px solid var(--sky);
+  border-radius: var(--radius-sm);
+  padding: .7rem 1rem;
+  font-size: .8rem;
+  color: #2E5F73;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+/* Offline banner */
+#offline-banner {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  background: var(--warm);
+  color: #fff;
+  text-align: center;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: .5rem 1rem;
+  z-index: 500;
+}
+#offline-banner.show { display: block; }
+
+/* Version footer in settings */
+#version-footer {
+  font-size: .72rem;
+  color: var(--text-3);
+  text-align: center;
+  padding: 1.25rem 0 .25rem;
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ─────────────────────────────────────────────
+   EMPTY STATE
+───────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 2.5rem 1rem;
+  color: var(--text-3);
+}
+.empty-state .es-icon { font-size: 2.5rem; margin-bottom: .5rem; }
+.empty-state p { font-size: .9rem; }
+
+/* ─────────────────────────────────────────────
+   MOBILE RESPONSIVE
+───────────────────────────────────────────── */
+@media (max-width: 700px) {
+  #hamburger { display: block; }
+  #nav { transform: translateX(-100%); }
+  #nav.open { transform: translateX(0); box-shadow: var(--shadow-md); }
+  #nav-overlay.open { display: block; }
+  #main { margin-left: 0; padding: 1rem 1rem 3rem; padding-top: 3.5rem; }
+  .form-row-2 { grid-template-columns: 1fr; }
+  .card-grid { grid-template-columns: 1fr 1fr; }
+  .quick-grid { grid-template-columns: repeat(2, 1fr); }
+  #modal-overlay { align-items: flex-end; padding: 0; }
+  #modal { border-radius: var(--radius) var(--radius) 0 0; max-height: 92vh; }
+}
+@media (max-width: 400px) {
+  .card-grid { grid-template-columns: 1fr; }
+}
+
+/* Toast */
+#toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--text);
+  color: #fff;
+  padding: .7rem 1.3rem;
+  border-radius: 30px;
+  font-size: .875rem;
+  z-index: 999;
+  transition: transform .3s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ═══════════ OFFLINE BANNER ═══════════ -->
+<div id="offline-banner" role="alert">
+  📵 You are offline — Drive sync unavailable. All local data is safe.
+</div>
+
+<!-- ═══════════ HAMBURGER ═══════════ -->
+<button id="hamburger" aria-label="Open menu" onclick="toggleNav()">☰</button>
+<div id="nav-overlay" onclick="toggleNav()"></div>
+
+<div id="app">
+
+<!-- ═══════════ SIDEBAR NAV ═══════════ -->
+<nav id="nav" role="navigation" aria-label="Main navigation">
+  <div id="nav-logo">
+    <div class="logo-icon">🌿</div>
+    <h1>Autism Care<br>Dashboard</h1>
+    <p>Family use only</p>
+  </div>
+
+  <button id="child-badge" onclick="navigate('profile')">
+    <span id="badge-label">Child name</span>
+    <span id="badge-sub">Tap to edit profile</span>
+  </button>
+
+  <div id="nav-links">
+    <button class="nav-item active" data-page="home"          aria-label="Home"                onclick="navigate('home')">         <span class="ni">🏠</span> Home</button>
+    <button class="nav-item"        data-page="profile"       aria-label="Child Profile"       onclick="navigate('profile')">      <span class="ni">👤</span> Profile</button>
+    <button class="nav-item"        data-page="appointments"  aria-label="Appointments"        onclick="navigate('appointments')"> <span class="ni">📅</span> Appointments</button>
+    <button class="nav-item"        data-page="therapy"       aria-label="Therapy Notes"       onclick="navigate('therapy')">      <span class="ni">💬</span> Therapy Notes</button>
+    <button class="nav-item"        data-page="behavior"      aria-label="Behavior Log"        onclick="navigate('behavior')">     <span class="ni">📋</span> Behavior Log</button>
+    <button class="nav-item"        data-page="communication" aria-label="Communication"       onclick="navigate('communication')"><span class="ni">⭐</span> Communication</button>
+    <button class="nav-item"        data-page="dailylog"      aria-label="Daily Log"           onclick="navigate('dailylog')">     <span class="ni">📓</span> Daily Log</button>
+    <button class="nav-item"        data-page="documents"     aria-label="Documents"           onclick="navigate('documents')">    <span class="ni">📁</span> Documents</button>
+    <button class="nav-item"        data-page="report"        aria-label="Monthly Report"      onclick="navigate('report')">       <span class="ni">📊</span> Monthly Report</button>
+    <button class="nav-item"        data-page="settings"      aria-label="Data and Settings"   onclick="navigate('settings')">     <span class="ni">⚙️</span>  Data &amp; Settings</button>
+  </div>
+</nav>
+
+<!-- ═══════════ MAIN CONTENT ═══════════ -->
+<main id="main" role="main">
+
+<!-- DISCLAIMER -->
+<div id="disclaimer">
+  🔒 <strong>Private family tool.</strong>
+  This app is for personal organization only — it is not medical advice and does not replace any therapy, diagnosis, or professional guidance. All data stays on this device.
+</div>
+
+<!-- ────────────── HOME ────────────── -->
+<section id="page-home" class="page active">
+  <div class="page-header">
+    <div>
+      <h2 id="home-greeting">Good morning 🌿</h2>
+      <p id="home-date"></p>
+    </div>
+  </div>
+
+  <div class="card-grid" id="home-stats"></div>
+
+  <div class="section-title">Quick Actions</div>
+  <div class="quick-grid">
+    <button class="quick-btn" onclick="openModal('appointment')"><span class="qb-icon">📅</span>Add Appointment</button>
+    <button class="quick-btn" onclick="openModal('therapy')">    <span class="qb-icon">💬</span>Therapy Note</button>
+    <button class="quick-btn" onclick="openModal('behavior')">   <span class="qb-icon">📋</span>Behavior Log</button>
+    <button class="quick-btn" onclick="openModal('communication')"><span class="qb-icon">⭐</span>Comm Win</button>
+    <button class="quick-btn" onclick="openModal('dailylog')">   <span class="qb-icon">📓</span>Daily Log</button>
+    <button class="quick-btn" onclick="navigate('report')">      <span class="qb-icon">📊</span>View Report</button>
+  </div>
+
+  <div class="section-title">Next Appointment</div>
+  <div id="home-next-appt"></div>
+
+  <div class="section-title">Recent Behavior Logs</div>
+  <div id="home-recent-behavior"></div>
+
+  <div class="section-title">Recent Communication Wins</div>
+  <div id="home-recent-comm"></div>
+</section>
+
+<!-- ────────────── PROFILE ────────────── -->
+<section id="page-profile" class="page">
+  <div class="page-header">
+    <div><h2>Child Profile</h2><p>Core information about your child</p></div>
+    <button class="btn btn-primary" onclick="openModal('profile')">✏️ Edit Profile</button>
+  </div>
+  <div class="card" id="profile-view"></div>
+</section>
+
+<!-- ────────────── APPOINTMENTS ────────────── -->
+<section id="page-appointments" class="page">
+  <div class="page-header">
+    <div><h2>Appointments</h2><p>Upcoming and past</p></div>
+    <button class="btn btn-primary" onclick="openModal('appointment')">+ Add</button>
+  </div>
+  <div id="appt-list"></div>
+</section>
+
+<!-- ────────────── THERAPY ────────────── -->
+<section id="page-therapy" class="page">
+  <div class="page-header">
+    <div><h2>Therapy Notes</h2><p>ABA, OT, Speech, PT and more</p></div>
+    <button class="btn btn-primary" onclick="openModal('therapy')">+ Add Note</button>
+  </div>
+  <div id="therapy-list"></div>
+</section>
+
+<!-- ────────────── BEHAVIOR LOG ────────────── -->
+<section id="page-behavior" class="page">
+  <div class="page-header">
+    <div><h2>Behavior / Meltdown Log</h2><p>ABC-style tracking</p></div>
+    <button class="btn btn-primary" onclick="openModal('behavior')">+ Add Log</button>
+  </div>
+  <div class="section-title">This Week's Summary</div>
+  <div class="card" id="behavior-summary" style="margin-bottom:1.5rem;"></div>
+  <div class="section-title">All Entries</div>
+  <div id="behavior-list"></div>
+</section>
+
+<!-- ────────────── COMMUNICATION ────────────── -->
+<section id="page-communication" class="page">
+  <div class="page-header">
+    <div><h2>Communication Progress</h2><p>Words, signs, AAC, and wins</p></div>
+    <button class="btn btn-primary" onclick="openModal('communication')">+ Add Entry</button>
+  </div>
+  <div id="comm-list"></div>
+</section>
+
+<!-- ────────────── DAILY LOG ────────────── -->
+<section id="page-dailylog" class="page">
+  <div class="page-header">
+    <div><h2>Daily Care Log</h2><p>Sleep, meals, sensory, mood</p></div>
+    <button class="btn btn-primary" onclick="openModal('dailylog')">+ Add Day</button>
+  </div>
+  <div id="daily-list"></div>
+</section>
+
+<!-- ────────────── DOCUMENTS ────────────── -->
+<section id="page-documents" class="page">
+  <div class="page-header">
+    <div><h2>Documents</h2><p>Tap a category to expand it, then use its + Add button</p></div>
+    <button class="btn btn-primary" onclick="openModal('document')">+ Add Document</button>
+  </div>
+  <div id="doc-list"></div>
+</section>
+
+<!-- ────────────── REPORT ────────────── -->
+<section id="page-report" class="page">
+  <div class="page-header">
+    <div><h2>Monthly Report</h2><p>Summary from saved data</p></div>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+      <select id="report-month" style="width:auto;padding:.5rem .8rem;font-size:.85rem;"></select>
+      <button class="btn btn-primary" onclick="generateReport()">Generate</button>
+      <button class="btn btn-ghost"   onclick="window.print()">🖨️ Print</button>
+    </div>
+  </div>
+  <div id="report-output"></div>
+</section>
+
+<!-- ────────────── SETTINGS ────────────── -->
+<section id="page-settings" class="page">
+  <div class="page-header">
+    <div><h2>Data &amp; Settings</h2><p>Backup, restore, and manage your data</p></div>
+  </div>
+
+  <!-- Export -->
+  <div class="card" style="margin-bottom:1rem;">
+    <div style="display:flex;align-items:flex-start;gap:.9rem;">
+      <div style="font-size:2rem;line-height:1;padding-top:.1rem;">💾</div>
+      <div style="flex:1;">
+        <h3 style="font-size:1rem;margin-bottom:.3rem;">Export Backup</h3>
+        <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.5rem;">
+          Downloads <strong>all your data and uploaded files</strong> as a single
+          <code style="background:var(--surface-2);padding:.1rem .4rem;border-radius:4px;font-size:.8rem;">.json</code>
+          file. Save it to iCloud Drive, Google Drive, a USB drive, or email it to yourself.
+        </p>
+        <!-- Last backup status -->
+        <div id="last-backup-display" style="
+          display:flex;align-items:center;gap:.5rem;
+          background:var(--surface-2);border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);padding:.5rem .75rem;
+          margin-bottom:.75rem;font-size:.8rem;color:var(--text-3);">
+          <span style="font-size:1rem;">🕐</span>
+          <span id="last-backup-text">No backup created yet in this browser.</span>
+        </div>
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+          <button class="btn btn-primary" id="export-btn" onclick="exportData()">
+            ⬇️ Download Backup File
+          </button>
+          <span id="export-progress" style="display:none;font-size:.8rem;color:var(--text-2);align-self:center;">
+            ⏳ Building backup…
+          </span>
+        </div>
+        <p style="font-size:.72rem;color:var(--text-3);margin-top:.5rem;">
+          Works on Windows, Mac, Chromebook, iPhone, and iPad. File includes all logs,
+          appointments, profiles, and attached documents.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import -->
+  <div class="card" style="margin-bottom:1rem;">
+    <div style="display:flex;align-items:flex-start;gap:.9rem;">
+      <div style="font-size:2rem;line-height:1;padding-top:.1rem;">📥</div>
+      <div style="flex:1;">
+        <h3 style="font-size:1rem;margin-bottom:.3rem;">Import / Restore Backup</h3>
+        <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.6rem;">
+          Restore from a backup file you exported earlier. Works across devices —
+          export on your iPad, import on your laptop, or vice versa.
+        </p>
+        <!-- Warning box -->
+        <div style="
+          background:var(--warm-pale);border:1.5px solid #e8c9a8;
+          border-radius:var(--radius-sm);padding:.65rem .85rem;
+          margin-bottom:.75rem;font-size:.8rem;color:#7a4a20;
+          display:flex;gap:.5rem;align-items:flex-start;">
+          <span style="font-size:1rem;flex-shrink:0;">⚠️</span>
+          <span><strong>This will replace all current data</strong> — appointments,
+          logs, profile, and uploaded files — with the contents of the backup file.
+          Export a backup first if you want to keep your current data.</span>
+        </div>
+        <!-- File picker styled as a button for cross-platform reliability -->
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-sky" onclick="document.getElementById('import-file-input').click()">
+            📂 Choose Backup File
+          </button>
+          <span id="import-filename" style="font-size:.8rem;color:var(--text-3);">No file chosen</span>
+        </div>
+        <input type="file" id="import-file-input" accept=".json,application/json"
+               style="display:none;" onchange="importFileChosen(this)" />
+        <!-- Import preview — shown after a file is chosen -->
+        <div id="import-preview" style="display:none;margin-top:.85rem;">
+          <div style="
+            background:var(--accent-pale);border:1.5px solid var(--accent-lt);
+            border-radius:var(--radius-sm);padding:.75rem 1rem;margin-bottom:.75rem;">
+            <div style="font-size:.8rem;font-weight:700;color:var(--accent);margin-bottom:.4rem;">
+              📋 Backup file details
+            </div>
+            <div id="import-preview-body" style="font-size:.8rem;color:var(--text-2);line-height:1.7;"></div>
+          </div>
+          <div style="display:flex;gap:.6rem;flex-wrap:wrap;">
+            <button class="btn btn-primary" id="import-confirm-btn" onclick="confirmImport()">
+              ✅ Restore This Backup
+            </button>
+            <button class="btn btn-ghost" onclick="cancelImport()">Cancel</button>
+          </div>
+        </div>
+        <p style="font-size:.72rem;color:var(--text-3);margin-top:.6rem;">
+          After restoring, the dashboard will reload automatically so all data appears fresh.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Google Drive Sync -->
+  <div class="card" style="margin-bottom:1rem;" id="gdrive-card">
+    <div style="display:flex;align-items:flex-start;gap:.9rem;">
+      <div style="font-size:2rem;line-height:1;padding-top:.1rem;">
+        <!-- Google Drive colour icon (inline SVG, no external dependency) -->
+        <svg width="32" height="28" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+          <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+          <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+          <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+          <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+          <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+        </svg>
+      </div>
+      <div style="flex:1;">
+        <h3 style="font-size:1rem;margin-bottom:.3rem;">Google Drive Sync</h3>
+        <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.6rem;">
+          Keep one master file on Google Drive that you can update from any device.
+          Sign in once, then use two buttons to stay in sync.
+        </p>
+
+        <!-- Sign-in status bar -->
+        <div id="gd-status" style="
+          display:flex;align-items:center;gap:.6rem;
+          background:var(--surface-2);border:1.5px solid var(--border);
+          border-radius:var(--radius-sm);padding:.55rem .8rem;
+          margin-bottom:.85rem;font-size:.8rem;color:var(--text-3);">
+          <span id="gd-status-dot" style="width:9px;height:9px;border-radius:50%;background:var(--border);flex-shrink:0;"></span>
+          <span id="gd-status-text">Not signed in to Google</span>
+          <button id="gd-signout-btn" onclick="gdriveSignOut()" style="
+            display:none;margin-left:auto;font-size:.75rem;
+            background:none;border:none;color:var(--text-3);
+            cursor:pointer;text-decoration:underline;">Sign out</button>
+        </div>
+
+        <!-- Last sync line -->
+        <div id="gd-sync-line" style="display:none;font-size:.75rem;color:var(--text-3);margin-bottom:.8rem;">
+          <span id="gd-sync-text"></span>
+        </div>
+
+        <!-- GIS not loaded notice (shown when running inside iframe/preview) -->
+        <div id="gd-iframe-notice" style="display:none;
+          background:var(--warm-pale);border:1.5px solid #e8c9a8;
+          border-radius:var(--radius-sm);padding:.65rem .85rem;
+          margin-bottom:.75rem;font-size:.8rem;color:#7a4a20;">
+          ⚠️ <strong>Google sign-in requires the app to be open as a real file in your browser</strong>,
+          not inside a preview panel. Save the HTML file to your desktop, open it in Chrome or Edge,
+          and these buttons will work.
+        </div>
+
+        <!-- Buttons — always visible, disabled until GIS ready -->
+        <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem;">
+          <button class="btn btn-primary" id="gd-signin-btn" onclick="gdriveSignIn()">
+            🔑 Sign in with Google
+          </button>
+          <button class="btn btn-primary" id="gd-update-btn" onclick="gdriveSaveMaster()" style="display:none;">
+            ☁️ Update Master File
+          </button>
+          <button class="btn btn-ghost" id="gd-newver-btn" onclick="gdriveSaveNewVersion()" style="display:none;">
+            📄 Save New Version
+          </button>
+          <button class="btn btn-sky" id="gd-load-btn" onclick="gdriveLoad()" style="display:none;">
+            ⬇️ Load from Drive
+          </button>
+        </div>
+
+        <!-- Step-by-step progress line -->
+        <div id="gd-progress-line" style="display:none;font-size:.8rem;color:var(--accent);
+          margin-bottom:.6rem;display:flex;align-items:center;gap:.4rem;">
+          <span style="animation:spin 1s linear infinite;display:inline-block;">⏳</span>
+          <span id="gd-progress-text"></span>
+        </div>
+
+        <!-- Diagnostic button -->
+        <div style="margin-top:.5rem;padding-top:.75rem;border-top:1px solid var(--border);">
+          <button class="btn btn-ghost btn-sm" id="gd-test-btn" onclick="gdriveDiagnostic()">
+            🔍 Run Connection Test
+          </button>
+          <span style="font-size:.75rem;color:var(--text-3);margin-left:.5rem;">
+            Tap this to diagnose what's working and what isn't
+          </span>
+        </div>
+        <div id="gd-diagnostic-output" style="display:none;margin-top:.75rem;
+          font-family:monospace;font-size:.78rem;line-height:1.9;
+          background:#1e1e1e;color:#d4d4d4;border-radius:var(--radius-sm);
+          padding:.85rem 1rem;white-space:pre-wrap;word-break:break-all;"></div>
+        <details style="font-size:.78rem;color:var(--text-3);">
+          <summary style="cursor:pointer;font-weight:600;color:var(--text-2);">How does this work?</summary>
+          <div style="margin-top:.5rem;line-height:1.7;padding-left:.5rem;border-left:3px solid var(--border);">
+            <p><strong>☁️ Update Master File</strong> — overwrites <code>Autism-Care-Master.json</code>
+            in your Drive with today's data. Use this every time you finish a session.</p>
+            <p style="margin-top:.4rem"><strong>📄 Save New Version</strong> — creates a dated copy
+            like <code>Autism-Care-2026-06-08.json</code> alongside the master. Good for milestones
+            or before big changes.</p>
+            <p style="margin-top:.4rem"><strong>⬇️ Load from Drive</strong> — pulls the master file
+            down and restores it here. Use this when switching devices.</p>
+            <p style="margin-top:.4rem">Files are saved in a folder called
+            <strong>Autism Care Dashboard</strong> inside your Google Drive.</p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- Clear -->
+  <div class="card">
+    <div style="display:flex;align-items:flex-start;gap:.9rem;">
+      <div style="font-size:2rem;line-height:1;padding-top:.1rem;">🗑️</div>
+      <div style="flex:1;">
+        <h3 style="font-size:1rem;margin-bottom:.3rem;color:var(--danger);">Clear All Data</h3>
+        <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.75rem;">
+          Permanently deletes everything in this browser — all logs, appointments,
+          the child profile, and all uploaded files. Export a backup first.
+        </p>
+        <button class="btn btn-danger" onclick="confirmClear()">🗑️ Clear All Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Version footer -->
+  <div id="version-footer">
+    Autism Care Dashboard v1.2 &nbsp;·&nbsp; Private family use only &nbsp;·&nbsp; Not for medical diagnosis or treatment
+  </div>
+</section>
+
+</main><!-- /main -->
+</div><!-- /app -->
+
+<!-- ═══════════ MODAL ═══════════ -->
+<div id="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div id="modal">
+    <div id="modal-header">
+      <h3 id="modal-title">Add Entry</h3>
+      <button id="modal-close" onclick="closeModal()" aria-label="Close">✕</button>
+    </div>
+    <div id="modal-body"></div>
+    <div id="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ LIGHTBOX ═══════════ -->
+<div id="lightbox" onclick="closeLightbox()">
+  <button id="lightbox-close" onclick="closeLightbox()" aria-label="Close image">✕</button>
+  <img id="lightbox-img" src="" alt="Document preview" onclick="event.stopPropagation()"/>
+</div>
+
+<!-- ═══════════ TOAST ═══════════ -->
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   DATA LAYER
+   All data stored under the key  "acd_data"  in localStorage.
+   Schema:
+   {
+     profile: { ... },
+     appointments: [ {id, ...} ],
+     therapy: [ {id, ...} ],
+     behavior: [ {id, ...} ],
+     communication: [ {id, ...} ],
+     dailylog: [ {id, ...} ],
+     documents: [ {id, ...} ],
+   }
+══════════════════════════════════════════════════════ */
+
+const STORE_KEY = 'acd_data';
+
+function loadData() {
+  try {
+    return JSON.parse(localStorage.getItem(STORE_KEY)) || defaultData();
+  } catch { return defaultData(); }
+}
+
+function defaultData() {
+  return {
+    profile: {
+      name: '', age: '', diagnosisNotes: '', supportLevel: '',
+      communicationLevel: '', sensoryPrefs: '', calmingTools: '',
+      knownTriggers: '', foodConcerns: '', sleepNotes: '',
+      pottyNotes: '', providers: ''
+    },
+    appointments:  [],
+    therapy:       [],
+    behavior:      [],
+    communication: [],
+    dailylog:      [],
+    documents:     []
+  };
+}
+
+function saveData(data) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(data));
+  } catch(e) {
+    if (e.name === 'QuotaExceededError' || e.code === 22) {
+      toast('⚠️ Storage full! Please go to Data & Settings and export a backup, then clear old data.', 8000);
+    } else {
+      toast('⚠️ Could not save: ' + e.message, 5000);
+    }
+  }
+}
+
+function getData() { return loadData(); }
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+/* ══════════════════════════════════════════════════════
+   NAVIGATION
+══════════════════════════════════════════════════════ */
+
+let currentPage = 'home';
+
+function navigate(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+
+  const el = document.getElementById('page-' + page);
+  if (el) el.classList.add('active');
+  const btn = document.querySelector(`[data-page="${page}"]`);
+  if (btn) btn.classList.add('active');
+
+  currentPage = page;
+  renderPage(page);
+
+  // close mobile nav if open
+  if (window.innerWidth <= 700) {
+    document.getElementById('nav').classList.remove('open');
+    document.getElementById('nav-overlay').classList.remove('open');
+  }
+}
+
+function toggleNav() {
+  document.getElementById('nav').classList.toggle('open');
+  document.getElementById('nav-overlay').classList.toggle('open');
+}
+
+/* ══════════════════════════════════════════════════════
+   RENDER DISPATCH
+══════════════════════════════════════════════════════ */
+
+function renderPage(page) {
+  const fn = {
+    home:          renderHome,
+    profile:       renderProfile,
+    appointments:  renderAppointments,
+    therapy:       renderTherapy,
+    behavior:      renderBehavior,
+    communication: renderCommunication,
+    dailylog:      renderDailyLog,
+    documents:     renderDocuments,
+    report:        renderReportPicker,
+    settings:      renderSettings
+  }[page];
+  if (fn) fn();
+  updateChildBadge();
+}
+
+/* ══════════════════════════════════════════════════════
+   HOME
+══════════════════════════════════════════════════════ */
+
+function renderHome() {
+  const d = getData();
+  const now = new Date();
+
+  // Greeting
+  const hr = now.getHours();
+  const greet = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  const name  = d.profile.name ? `, ${d.profile.name.split(' ')[0]}'s family` : '';
+  document.getElementById('home-greeting').textContent = `${greet}${name} 🌿`;
+  document.getElementById('home-date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+  // Upcoming appointments this week
+  const weekFromNow = new Date(now); weekFromNow.setDate(weekFromNow.getDate() + 7);
+  const upcomingAppts = d.appointments
+    .filter(a => a.datetime && new Date(a.datetime) >= now)
+    .sort((a,b) => new Date(a.datetime) - new Date(b.datetime));
+
+  const thisWeekTherapy = d.therapy.filter(t => {
+    const td = new Date(t.date);
+    return td >= startOfWeek(now) && td <= endOfWeek(now);
+  });
+
+  // Stats
+  document.getElementById('home-stats').innerHTML = `
+    <div class="stat-card green">
+      <div class="stat-val">${upcomingAppts.length}</div>
+      <div class="stat-lbl">Upcoming Appointments</div>
+    </div>
+    <div class="stat-card sky">
+      <div class="stat-val">${thisWeekTherapy.length}</div>
+      <div class="stat-lbl">Therapy Sessions This Week</div>
+    </div>
+    <div class="stat-card warm">
+      <div class="stat-val">${d.behavior.filter(b => sameWeek(new Date(b.datetime||b.date), now)).length}</div>
+      <div class="stat-lbl">Behavior Logs This Week</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-val">${d.communication.filter(c => sameWeek(new Date(c.date), now)).length}</div>
+      <div class="stat-lbl">Comm Wins This Week</div>
+    </div>
+  `;
+
+  // Next appointment
+  const nextAppt = upcomingAppts[0];
+  document.getElementById('home-next-appt').innerHTML = nextAppt
+    ? `<div class="item-card">
+        <div style="font-size:1.6rem">📅</div>
+        <div class="item-main">
+          <div class="item-title">${esc(nextAppt.type)} with ${esc(nextAppt.provider)}</div>
+          <div class="item-sub">${fmtDateTime(nextAppt.datetime)} · ${esc(nextAppt.location||'Location TBD')}</div>
+          ${nextAppt.notes ? `<div class="item-sub" style="margin-top:.3rem">${esc(nextAppt.notes)}</div>` : ''}
+        </div>
+       </div>`
+    : emptyState('📅','No upcoming appointments');
+
+  // Recent behavior
+  const recentB = d.behavior.slice().sort((a,b)=>new Date(b.datetime||b.date)-new Date(a.datetime||a.date)).slice(0,3);
+  document.getElementById('home-recent-behavior').innerHTML = recentB.length
+    ? recentB.map(b => `
+        <div class="item-card" style="margin-bottom:.5rem;">
+          <div style="font-size:1.4rem">📋</div>
+          <div class="item-main">
+            <div class="item-title">${esc(b.behavior||'Behavior entry')} ${intensityHtml(b.intensity)}</div>
+            <div class="item-sub">${fmtDateTime(b.datetime||b.date)} · Trigger: ${esc(b.trigger||'Unknown')}</div>
+          </div>
+        </div>`).join('')
+    : emptyState('📋','No behavior logs yet');
+
+  // Recent communication wins
+  const recentC = d.communication.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,3);
+  document.getElementById('home-recent-comm').innerHTML = recentC.length
+    ? recentC.map(c => `
+        <div class="item-card" style="margin-bottom:.5rem;">
+          <div style="font-size:1.4rem">⭐</div>
+          <div class="item-main">
+            <div class="item-title">${esc(c.wins||c.words||'Communication win')}</div>
+            <div class="item-sub">${fmtDate(c.date)}</div>
+          </div>
+        </div>`).join('')
+    : emptyState('⭐','No communication wins logged yet');
+}
+
+/* ══════════════════════════════════════════════════════
+   PROFILE
+══════════════════════════════════════════════════════ */
+
+function renderProfile() {
+  const p = getData().profile;
+  const fields = [
+    ['Name', p.name], ['Age', p.age],
+    ['Diagnosis Notes', p.diagnosisNotes], ['Support Level', p.supportLevel],
+    ['Communication Level', p.communicationLevel], ['Sensory Preferences', p.sensoryPrefs],
+    ['Calming Tools', p.calmingTools], ['Known Triggers', p.knownTriggers],
+    ['Food Concerns', p.foodConcerns], ['Sleep Notes', p.sleepNotes],
+    ['Potty Training Notes', p.pottyNotes], ['Current Providers', p.providers]
+  ];
+  document.getElementById('profile-view').innerHTML = `
+    <div class="profile-grid">
+      ${fields.map(([lbl,val]) => `
+        <div class="profile-field">
+          <div class="pf-label">${lbl}</div>
+          <div class="pf-val ${val ? '' : 'empty'}">${val ? esc(val) : 'Not set'}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function updateChildBadge() {
+  const p = getData().profile;
+  document.getElementById('badge-label').textContent = p.name || 'Set child name';
+  document.getElementById('badge-sub').textContent   = p.age  ? `Age ${p.age}` : 'Tap to edit profile';
+}
+
+/* ══════════════════════════════════════════════════════
+   APPOINTMENTS
+══════════════════════════════════════════════════════ */
+
+function renderAppointments() {
+  const d = getData();
+  const sorted = d.appointments.slice().sort((a,b) => new Date(a.datetime) - new Date(b.datetime));
+  const upcoming = sorted.filter(a => new Date(a.datetime) >= new Date());
+  const past     = sorted.filter(a => new Date(a.datetime) <  new Date()).reverse();
+
+  let html = '';
+  if (upcoming.length) {
+    html += '<div class="section-title">Upcoming</div><div class="item-list">';
+    html += upcoming.map(a => apptCard(a)).join('');
+    html += '</div>';
+  }
+  if (past.length) {
+    html += '<div class="section-title" style="margin-top:1.5rem">Past</div><div class="item-list">';
+    html += past.map(a => apptCard(a)).join('');
+    html += '</div>';
+  }
+  if (!d.appointments.length) html = emptyState('📅','No appointments yet. Add one to get started.');
+  document.getElementById('appt-list').innerHTML = html;
+}
+
+function apptCard(a) {
+  return `<div class="item-card">
+    <div style="font-size:1.5rem">📅</div>
+    <div class="item-main">
+      <div class="item-title">${esc(a.type)} <span class="badge badge-sky">${esc(a.provider)}</span></div>
+      <div class="item-sub">${fmtDateTime(a.datetime)} · ${esc(a.location||'')}</div>
+      ${a.notes ? `<div class="item-sub">Notes: ${esc(a.notes)}</div>` : ''}
+      ${a.questions ? `<div class="item-sub">❓ ${esc(a.questions)}</div>` : ''}
+      ${a.followup  ? `<div><span class="badge badge-warm" style="margin-top:.3rem">Follow-up needed</span></div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('appointment','${a.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('appointments','${a.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   THERAPY NOTES
+══════════════════════════════════════════════════════ */
+
+function renderTherapy() {
+  const d = getData();
+  const sorted = d.therapy.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+  document.getElementById('therapy-list').innerHTML = sorted.length
+    ? `<div class="item-list">${sorted.map(t => therapyCard(t)).join('')}</div>`
+    : emptyState('💬','No therapy notes yet.');
+}
+
+function therapyCard(t) {
+  const typeColors = { ABA:'badge-green', OT:'badge-sky', Speech:'badge-warm', PT:'badge-gray', Other:'badge-gray' };
+  return `<div class="item-card">
+    <div style="font-size:1.5rem">💬</div>
+    <div class="item-main">
+      <div class="item-title">
+        <span class="badge ${typeColors[t.type]||'badge-gray'}">${esc(t.type)}</span>
+        ${esc(t.provider)} · ${fmtDate(t.date)}
+      </div>
+      ${t.goals     ? `<div class="item-sub">🎯 Goals: ${esc(t.goals)}</div>` : ''}
+      ${t.wentWell  ? `<div class="item-sub">✅ Went well: ${esc(t.wentWell)}</div>` : ''}
+      ${t.wasHard   ? `<div class="item-sub">⚠️ Was hard: ${esc(t.wasHard)}</div>` : ''}
+      ${t.homework  ? `<div class="item-sub">📝 Homework: ${esc(t.homework)}</div>` : ''}
+      ${t.nextSteps ? `<div class="item-sub">➡️ Next: ${esc(t.nextSteps)}</div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('therapy','${t.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('therapy','${t.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   BEHAVIOR LOG
+══════════════════════════════════════════════════════ */
+
+function renderBehavior() {
+  const d = getData();
+  const sorted = d.behavior.slice().sort((a,b) => new Date(b.datetime||b.date) - new Date(a.datetime||a.date));
+
+  // Weekly summary
+  const now = new Date();
+  const thisWeek = sorted.filter(b => sameWeek(new Date(b.datetime||b.date), now));
+  const triggers  = countBy(thisWeek, 'trigger');
+  const calming   = countBy(thisWeek, 'calming');
+
+  document.getElementById('behavior-summary').innerHTML = thisWeek.length
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div>
+          <div class="form-section-title">Common Triggers This Week</div>
+          <div class="summary-pills">${Object.entries(triggers).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`<div class="pill">${esc(k)} (${v})</div>`).join('')||'<span style="color:var(--text-3);font-size:.85rem">None logged</span>'}</div>
+        </div>
+        <div>
+          <div class="form-section-title">Top Calming Strategies</div>
+          <div class="summary-pills">${Object.entries(calming).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>`<div class="pill sky">${esc(k)} (${v})</div>`).join('')||'<span style="color:var(--text-3);font-size:.85rem">None logged</span>'}</div>
+        </div>
+       </div>
+       <div style="margin-top:.75rem;font-size:.8rem;color:var(--text-3)">${thisWeek.length} log(s) this week</div>`
+    : `<p style="color:var(--text-3);font-size:.875rem">No behavior logs this week yet.</p>`;
+
+  document.getElementById('behavior-list').innerHTML = sorted.length
+    ? `<div class="item-list">${sorted.map(b => behaviorCard(b)).join('')}</div>`
+    : emptyState('📋','No behavior logs yet.');
+}
+
+function behaviorCard(b) {
+  return `<div class="item-card">
+    <div style="font-size:1.5rem">📋</div>
+    <div class="item-main">
+      <div class="item-title">${esc(b.behavior||'Behavior')} ${intensityHtml(b.intensity)}</div>
+      <div class="item-sub">${fmtDateTime(b.datetime||b.date)} · Duration: ${esc(b.duration||'Unknown')}</div>
+      ${b.antecedent  ? `<div class="item-sub">Before: ${esc(b.antecedent)}</div>` : ''}
+      ${b.consequence ? `<div class="item-sub">After: ${esc(b.consequence)}</div>` : ''}
+      ${b.trigger     ? `<div class="item-sub">🔴 Trigger: ${esc(b.trigger)}</div>` : ''}
+      ${b.calming     ? `<div class="item-sub">💙 Calming: ${esc(b.calming)}</div>` : ''}
+      ${b.notes       ? `<div class="item-sub">${esc(b.notes)}</div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('behavior','${b.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('behavior','${b.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   COMMUNICATION
+══════════════════════════════════════════════════════ */
+
+function renderCommunication() {
+  const d = getData();
+  const sorted = d.communication.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+  document.getElementById('comm-list').innerHTML = sorted.length
+    ? `<div class="item-list">${sorted.map(c => commCard(c)).join('')}</div>`
+    : emptyState('⭐','No communication entries yet.');
+}
+
+function commCard(c) {
+  return `<div class="item-card">
+    <div style="font-size:1.5rem">⭐</div>
+    <div class="item-main">
+      <div class="item-title">${fmtDate(c.date)}</div>
+      ${c.words   ? `<div class="item-sub">🗣️ Words/Signs: ${esc(c.words)}</div>` : ''}
+      ${c.aac     ? `<div class="item-sub">📱 AAC/Cards: ${esc(c.aac)}</div>` : ''}
+      ${c.requests? `<div class="item-sub">🙋 Requests: ${esc(c.requests)}</div>` : ''}
+      ${c.social  ? `<div class="item-sub">👁️ Social/Eye contact: ${esc(c.social)}</div>` : ''}
+      ${c.imitation?`<div class="item-sub">🔄 Imitation: ${esc(c.imitation)}</div>` : ''}
+      ${c.wins    ? `<div class="item-sub">🌟 Wins: ${esc(c.wins)}</div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('communication','${c.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('communication','${c.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   DAILY LOG
+══════════════════════════════════════════════════════ */
+
+function renderDailyLog() {
+  const d = getData();
+  const sorted = d.dailylog.slice().sort((a,b) => new Date(b.date) - new Date(a.date));
+  document.getElementById('daily-list').innerHTML = sorted.length
+    ? `<div class="item-list">${sorted.map(dl => dailyCard(dl)).join('')}</div>`
+    : emptyState('📓','No daily logs yet.');
+}
+
+function dailyCard(dl) {
+  const moodEmoji = { great:'😄', good:'🙂', okay:'😐', hard:'😟', 'very hard':'😰' };
+  return `<div class="item-card">
+    <div style="font-size:1.5rem">📓</div>
+    <div class="item-main">
+      <div class="item-title">${fmtDate(dl.date)} ${dl.mood ? (moodEmoji[dl.mood]||'') : ''} <span class="badge badge-gray">${esc(dl.mood||'')}</span></div>
+      ${dl.sleep    ? `<div class="item-sub">😴 Sleep: ${esc(dl.sleep)}</div>` : ''}
+      ${dl.meals    ? `<div class="item-sub">🍽️ Meals: ${esc(dl.meals)}</div>` : ''}
+      ${dl.potty    ? `<div class="item-sub">🚽 Potty: ${esc(dl.potty)}</div>` : ''}
+      ${dl.sensory  ? `<div class="item-sub">🌀 Sensory: ${esc(dl.sensory)}</div>` : ''}
+      ${dl.routineChange ? `<div class="item-sub">🔄 Routine change: ${esc(dl.routineChange)}</div>` : ''}
+      ${dl.notes    ? `<div class="item-sub">📝 ${esc(dl.notes)}</div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('dailylog','${dl.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteRecord('dailylog','${dl.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+/* ══════════════════════════════════════════════════════
+   DOCUMENTS  (metadata in localStorage, files in IndexedDB)
+   Layout: collapsible category sections, each with its own + Add
+══════════════════════════════════════════════════════ */
+
+// All category definitions — order controls display order
+const DOC_CATEGORIES = [
+  { type: 'Diagnosis Report',    icon: '🩺', color: 'badge-warm'  },
+  { type: 'IEP/IFSP',           icon: '🏫', color: 'badge-green' },
+  { type: 'Therapy Evaluation',  icon: '💬', color: 'badge-sky'   },
+  { type: 'Insurance Letter',    icon: '💼', color: 'badge-sky'   },
+  { type: 'Medicaid/Vaya',       icon: '🏛️', color: 'badge-gray'  },
+  { type: 'Doctor Notes',        icon: '👨‍⚕️', color: 'badge-green' },
+  { type: 'Other',               icon: '📄', color: 'badge-gray'  },
+];
+
+// Track which sections are open across renders
+const _openSections = new Set(['Diagnosis Report','IEP/IFSP']); // open by default
+
+function renderDocuments() {
+  const d = getData();
+
+  // Group docs by type
+  const byType = {};
+  DOC_CATEGORIES.forEach(c => { byType[c.type] = []; });
+  d.documents.forEach(doc => {
+    const key = DOC_CATEGORIES.find(c => c.type === doc.type) ? doc.type : 'Other';
+    byType[key].push(doc);
+  });
+  // Sort each group newest-first
+  Object.values(byType).forEach(arr => arr.sort((a,b) => new Date(b.date) - new Date(a.date)));
+
+  // Storage meter card
+  let html = `
+    <div class="card" style="margin-bottom:1.25rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.3rem;">
+        <span style="font-size:.8rem;font-weight:600;color:var(--text-2);">📦 Storage used</span>
+        <span id="storage-label" style="font-size:.75rem;color:var(--text-3);">Calculating…</span>
+      </div>
+      <div id="storage-bar-wrap"><div id="storage-bar" style="width:0%"></div></div>
+      <p style="font-size:.72rem;color:var(--text-3);margin-top:.25rem;">Quota is based on your device's available disk space — typically several GB on a modern phone or computer. Files are stored privately in your browser and never leave your device.</p>
+    </div>`;
+
+  // Category sections
+  DOC_CATEGORIES.forEach(cat => {
+    const docs   = byType[cat.type] || [];
+    const isOpen = _openSections.has(cat.type);
+    html += `
+      <div class="doc-section ${isOpen ? 'open' : ''}" id="dcat-${cat.type.replace(/\W/g,'_')}">
+        <button class="doc-section-header" onclick="toggleDocSection('${cat.type.replace(/'/g,"\\'")}')">
+          <span class="dsh-icon">${cat.icon}</span>
+          <span class="dsh-title">${esc(cat.type)}</span>
+          <span class="dsh-count">${docs.length}</span>
+          <span class="dsh-add" onclick="event.stopPropagation(); openModalForType('${cat.type.replace(/'/g,"\\'")}')">+ Add</span>
+          <span class="dsh-chevron">▼</span>
+        </button>
+        <div class="doc-section-body">
+          ${docs.length
+            ? `<div class="item-list">${docs.map(doc => docCardShell(doc, cat.color)).join('')}</div>`
+            : `<div style="padding:.5rem 0;font-size:.875rem;color:var(--text-3);">No ${esc(cat.type)} documents yet. Tap <strong>+ Add</strong> above to upload one.</div>`
+          }
+        </div>
+      </div>`;
+  });
+
+  document.getElementById('doc-list').innerHTML = html;
+
+  // Async: fill file chips for all visible docs
+  d.documents.forEach(doc => {
+    (doc.fileIds || []).forEach(fid => {
+      idbGetFile(fid).then(f => {
+        if (!f) return;
+        const slot = document.getElementById('fslot-' + fid);
+        if (slot) slot.outerHTML = fileChipHtml(f, fid);
+      });
+    });
+  });
+
+  updateStorageMeter();
+}
+
+function toggleDocSection(type) {
+  const key = type.replace(/\W/g,'_');
+  const el  = document.getElementById('dcat-' + key);
+  if (!el) return;
+  const isOpen = el.classList.toggle('open');
+  if (isOpen) _openSections.add(type);
+  else        _openSections.delete(type);
+}
+
+// Open Add modal pre-filled to a specific document type
+function openModalForType(type) {
+  _pendingFiles = [];
+  modalType    = 'document';
+  modalEditId  = null;
+  document.getElementById('modal-title').textContent = 'Add Document';
+
+  // Build form then pre-select the type
+  document.getElementById('modal-body').innerHTML = buildForm('document', { type });
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+// Shell card – file slots filled async after render
+function docCardShell(doc, badgeColor) {
+  const color = badgeColor || 'badge-gray';
+  const fileSlots = (doc.fileIds||[]).map(fid =>
+    `<span id="fslot-${fid}" style="font-size:.75rem;color:var(--text-3);">⏳</span>`
+  ).join('');
+
+  return `<div class="item-card" id="doc-card-${doc.id}">
+    <div class="item-main">
+      <div class="item-title">${esc(doc.name)}</div>
+      <div class="item-sub">${fmtDate(doc.date)}${doc.location ? ' · 📍 ' + esc(doc.location) : ''}</div>
+      ${doc.notes ? `<div class="item-sub">${esc(doc.notes)}</div>` : ''}
+      ${(doc.fileIds||[]).length ? `<div class="doc-file-row">${fileSlots}</div>` : ''}
+    </div>
+    <div class="item-actions">
+      <button class="btn btn-ghost btn-sm" onclick="openModal('document','${doc.id}')">Edit</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteDocument('${doc.id}')">✕</button>
+    </div>
+  </div>`;
+}
+
+function fileChipHtml(f, fid) {
+  const isImage = f.mimeType && f.mimeType.startsWith('image/');
+  if (isImage) {
+    // Show thumbnail; clicking opens lightbox
+    return `<img class="doc-thumb" src="${f.dataUrl}" alt="${esc(f.name)}"
+              title="${esc(f.name)}" onclick="openLightbox('${fid}')" />`;
+  }
+  return `<a class="doc-file-chip" onclick="downloadFile('${fid}')" title="Download ${esc(f.name)}">
+    ${fileIcon(f.mimeType)} ${esc(f.name)} <span style="color:var(--text-3)">${fmtBytes(f.size)}</span>
+  </a>`;
+}
+
+function docTypeIcon(type) {
+  const m = { 'Diagnosis Report':'🩺','IEP/IFSP':'🏫','Therapy Evaluation':'💬',
+    'Insurance Letter':'💼','Medicaid/Vaya':'🏛️','Doctor Notes':'👨‍⚕️','Other':'📄' };
+  return m[type] || '📄';
+}
+function fileIcon(mime) {
+  if (!mime) return '📎';
+  if (mime.startsWith('image/'))       return '🖼️';
+  if (mime === 'application/pdf')      return '📕';
+  if (mime.includes('word'))           return '📝';
+  if (mime.includes('excel') || mime.includes('spreadsheet')) return '📊';
+  return '📎';
+}
+function fmtBytes(b) {
+  if (!b) return '';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
+}
+
+async function updateStorageMeter() {
+  try {
+    // Use the real browser-reported quota instead of a hardcoded guess.
+    // navigator.storage.estimate() returns usage + quota for this origin.
+    // Quota is typically 60-80% of free disk space on modern devices —
+    // could be several GB on an iPhone or Mac with space available.
+    let quota = 200 * 1024 * 1024; // fallback if API unavailable
+    let browserUsage = 0;           // total origin usage including IndexedDB + localStorage
+
+    if (navigator.storage && navigator.storage.estimate) {
+      const estimate = await navigator.storage.estimate();
+      if (estimate.quota)  quota        = estimate.quota;
+      if (estimate.usage)  browserUsage = estimate.usage;
+    }
+
+    // Also sum our own file sizes from IDB for the display number
+    const keys = await idbListFileKeys();
+    let fileBytes = 0;
+    for (const k of keys) {
+      const f = await idbGetFile(k);
+      if (f && f.size) fileBytes += f.size;
+    }
+
+    // Show actual origin usage vs quota (more accurate than just our files)
+    const used = Math.max(fileBytes, browserUsage);
+    const pct  = Math.min(100, (used / quota) * 100).toFixed(1);
+
+    const bar = document.getElementById('storage-bar');
+    const lbl = document.getElementById('storage-label');
+
+    if (bar) {
+      bar.style.width = pct + '%';
+      bar.className   = pct > 85 ? 'danger' : pct > 60 ? 'warn' : '';
+    }
+    if (lbl) {
+      const quotaLabel = quota > 1073741824
+        ? (quota / 1073741824).toFixed(1) + ' GB'
+        : (quota / 1048576).toFixed(0)    + ' MB';
+      lbl.textContent = `${fmtBytes(used)} of ${quotaLabel} available (${pct}%)`;
+    }
+  } catch (e) {
+    const lbl = document.getElementById('storage-label');
+    if (lbl) lbl.textContent = 'Storage info unavailable';
+  }
+}
+
+function renderSettings() {
+  // Refresh the last-backup timestamp and Drive sync line each time settings opens
+  renderLastBackup();
+  if (typeof _gdRenderSyncLine === 'function') _gdRenderSyncLine();
+}
+
+/* ══════════════════════════════════════════════════════
+   REPORT
+══════════════════════════════════════════════════════ */
+
+function renderReportPicker() {
+  const sel = document.getElementById('report-month');
+  sel.innerHTML = '';
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const val = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    const lbl = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const opt = document.createElement('option');
+    opt.value = val; opt.textContent = lbl;
+    sel.appendChild(opt);
+  }
+  generateReport();
+}
+
+function generateReport() {
+  const d  = getData();
+  const sel = document.getElementById('report-month').value;
+  if (!sel) return;
+  const [yr, mo] = sel.split('-').map(Number);
+
+  function inMonth(dateStr) {
+    if (!dateStr) return false;
+    const dt = new Date(dateStr);
+    return dt.getFullYear() === yr && dt.getMonth()+1 === mo;
+  }
+
+  const appts  = d.appointments.filter(a => inMonth(a.datetime));
+  const therapy= d.therapy.filter(t => inMonth(t.date));
+  const beh    = d.behavior.filter(b => inMonth(b.datetime||b.date));
+  const comm   = d.communication.filter(c => inMonth(c.date));
+  const daily  = d.dailylog.filter(dl => inMonth(dl.date));
+
+  const triggers  = countBy(beh, 'trigger');
+  const calming   = countBy(beh, 'calming');
+  const therapyT  = countBy(therapy, 'type');
+
+  const monthLabel = new Date(yr, mo-1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  document.getElementById('report-output').innerHTML = `
+    <div class="card" style="margin-bottom:1rem;">
+      <h3 style="margin-bottom:.2rem">Monthly Summary – ${monthLabel}</h3>
+      <p style="font-size:.8rem;color:var(--text-3)">Generated ${new Date().toLocaleDateString()}</p>
+      ${d.profile.name ? `<p style="margin-top:.4rem"><strong>Child:</strong> ${esc(d.profile.name)}</p>` : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="form-section-title">Appointments (${appts.length})</div>
+      ${appts.length ? appts.map(a => `<div style="font-size:.875rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+        <strong>${esc(a.type)}</strong> with ${esc(a.provider)} · ${fmtDateTime(a.datetime)}</div>`).join('')
+        : '<p style="font-size:.875rem;color:var(--text-3)">None this month</p>'}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="form-section-title">Therapy Sessions (${therapy.length})</div>
+      ${Object.entries(therapyT).map(([t,c])=>`<span class="badge badge-green" style="margin-right:.4rem">${esc(t)}: ${c}</span>`).join('')||'<p style="font-size:.875rem;color:var(--text-3)">None</p>'}
+      ${therapy.length ? `<div style="margin-top:.75rem">${therapy.map(t=>`<div style="font-size:.875rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+        <strong>${esc(t.type)}</strong> · ${fmtDate(t.date)} · ${esc(t.provider)}<br>
+        ${t.goals ? `<em>Goals: ${esc(t.goals)}</em>` : ''}</div>`).join('')}</div>` : ''}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="form-section-title">Behavior / Meltdown Log (${beh.length} entries)</div>
+      ${beh.length ? `
+        <div style="margin-bottom:.75rem">
+          <strong>Common Triggers:</strong><br>
+          <div class="summary-pills" style="margin-top:.4rem">
+            ${Object.entries(triggers).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<div class="pill">${esc(k)} (${v})</div>`).join('') || 'Not specified'}
+          </div>
+        </div>
+        <div>
+          <strong>Calming Strategies Used:</strong><br>
+          <div class="summary-pills" style="margin-top:.4rem">
+            ${Object.entries(calming).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([k,v])=>`<div class="pill sky">${esc(k)} (${v})</div>`).join('') || 'Not specified'}
+          </div>
+        </div>
+        <div style="margin-top:.75rem;font-size:.875rem">
+          Avg intensity: ${beh.filter(b=>b.intensity).length ? (beh.filter(b=>b.intensity).reduce((s,b)=>s+parseInt(b.intensity||0),0)/beh.filter(b=>b.intensity).length).toFixed(1) : 'N/A'}
+        </div>` : '<p style="font-size:.875rem;color:var(--text-3)">No behavior logs this month</p>'}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="form-section-title">Communication Wins (${comm.length} entries)</div>
+      ${comm.length ? comm.map(c=>`<div style="font-size:.875rem;padding:.35rem 0;border-bottom:1px solid var(--border)">
+        <strong>${fmtDate(c.date)}</strong>${c.words?` · Words: ${esc(c.words)}`:''}${c.wins?` · 🌟 ${esc(c.wins)}`:''}</div>`).join('')
+        : '<p style="font-size:.875rem;color:var(--text-3)">No entries</p>'}
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="form-section-title">Daily Care Patterns (${daily.length} days logged)</div>
+      ${daily.length ? (() => {
+        const moods = countBy(daily, 'mood');
+        return `<strong>Mood breakdown:</strong> ${Object.entries(moods).map(([m,c])=>`${esc(m)}: ${c}`).join(', ')||'N/A'}`;
+      })() : '<p style="font-size:.875rem;color:var(--text-3)">No daily logs</p>'}
+    </div>
+
+    <div class="card">
+      <div class="form-section-title">Notes for Providers</div>
+      <p style="font-size:.875rem;color:var(--text-3);font-style:italic">Add any parent concerns or questions to bring to your next appointment here. Notes are auto-saved.</p>
+      <textarea id="report-notes-textarea" placeholder="Type notes here before printing…"
+        style="margin-top:.5rem;width:100%;min-height:80px;"
+        oninput="saveReportNotes(this.value, '${sel}')">${esc(loadReportNotes(sel))}</textarea>
+    </div>
+  `;
+}
+
+// Fix 11: Persist report provider notes per month
+function saveReportNotes(val, monthKey) {
+  try { localStorage.setItem('acd_report_notes_' + monthKey, val); } catch(e) { /* quota */ }
+}
+function loadReportNotes(monthKey) {
+  try { return localStorage.getItem('acd_report_notes_' + monthKey) || ''; } catch(e) { return ''; }
+}
+
+/* ══════════════════════════════════════════════════════
+   MODAL FORMS
+══════════════════════════════════════════════════════ */
+
+let modalType  = '';
+let modalEditId = null;
+let _modalDirty = false; // Fix 12: track unsaved changes
+
+function openModal(type, id) {
+  modalType    = type;
+  modalEditId  = id || null;
+  _pendingFiles = [];
+  _modalDirty  = false; // reset on every open
+
+  const titles = {
+    profile:'Edit Profile', appointment:'Appointment',
+    therapy:'Therapy Note', behavior:'Behavior Log',
+    communication:'Communication Entry', dailylog:'Daily Log',
+    document:'Document'
+  };
+  document.getElementById('modal-title').textContent = (id ? 'Edit ' : 'Add ') + (titles[type] || type);
+  document.getElementById('modal-body').innerHTML = buildForm(type, id ? findRecord(type, id) : null);
+  document.getElementById('modal-overlay').classList.add('open');
+
+  // Mark dirty on any input change
+  setTimeout(() => {
+    const body = document.getElementById('modal-body');
+    if (body) {
+      body.addEventListener('input',  () => { _modalDirty = true; }, { passive: true });
+      body.addEventListener('change', () => { _modalDirty = true; }, { passive: true });
+    }
+  }, 100);
+
+  // Async: populate existing-file preview rows in document edit modal
+  if (type === 'document' && id) {
+    const rec = findRecord('document', id);
+    if (rec && rec.fileIds && rec.fileIds.length) {
+      loadExistingFilePreviews(rec.fileIds);
+    }
+  }
+}
+
+function closeModal(force) {
+  if (!force && _modalDirty) {
+    if (!confirm('You have unsaved changes. Close without saving?')) return;
+  }
+  document.getElementById('modal-overlay').classList.remove('open');
+  modalType = ''; modalEditId = null; _modalDirty = false;
+}
+
+// Close on overlay click
+document.getElementById('modal-overlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+function findRecord(type, id) {
+  const map = { appointment:'appointments', therapy:'therapy', behavior:'behavior',
+    communication:'communication', dailylog:'dailylog', document:'documents' };
+  const d = getData();
+  return (d[map[type]||type] || []).find(r => r.id === id) || null;
+}
+
+function val(id) {
+  // Scope to modal-body first to avoid duplicate-ID collisions across pages
+  const scope = document.getElementById('modal-body') || document;
+  const el = scope.querySelector('#' + id) || document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+function checked(id) {
+  const scope = document.getElementById('modal-body') || document;
+  const el = scope.querySelector('#' + id) || document.getElementById(id);
+  return el ? el.checked : false;
+}
+
+/* ─── Form builders ─── */
+
+function buildForm(type, rec) {
+  const r = rec || {};
+  const v = (k, fb) => esc(r[k] !== undefined ? r[k] : (fb || ''));
+  const today = todayStr();
+
+  if (type === 'profile') {
+    const d = getData().profile;
+    return `
+      <div class="form-row-2">
+        <div class="form-row"><label>Child Name</label><input id="f-name" value="${esc(d.name)}" placeholder="E.g. Jaylen"/></div>
+        <div class="form-row"><label>Age</label><input id="f-age" value="${esc(d.age)}" placeholder="E.g. 5"/></div>
+      </div>
+      <div class="form-row"><label>Diagnosis Notes</label><textarea id="f-diagnosisNotes" placeholder="E.g. ASD Level 2, ADHD">${esc(d.diagnosisNotes)}</textarea></div>
+      <div class="form-row-2">
+        <div class="form-row"><label>Support Level</label><input id="f-supportLevel" value="${esc(d.supportLevel)}" placeholder="E.g. Level 2"/></div>
+        <div class="form-row"><label>Communication Level</label><input id="f-communicationLevel" value="${esc(d.communicationLevel)}" placeholder="E.g. Limited verbal"/></div>
+      </div>
+      <div class="form-row"><label>Sensory Preferences</label><textarea id="f-sensoryPrefs" placeholder="What they seek or avoid">${esc(d.sensoryPrefs)}</textarea></div>
+      <div class="form-row"><label>Calming Tools</label><textarea id="f-calmingTools" placeholder="E.g. weighted blanket, chewing">${esc(d.calmingTools)}</textarea></div>
+      <div class="form-row"><label>Known Triggers</label><textarea id="f-knownTriggers" placeholder="What causes distress">${esc(d.knownTriggers)}</textarea></div>
+      <div class="form-row"><label>Food Concerns</label><textarea id="f-foodConcerns" placeholder="Allergies, preferences, aversions">${esc(d.foodConcerns)}</textarea></div>
+      <div class="form-row"><label>Sleep Notes</label><textarea id="f-sleepNotes" placeholder="Routine, issues, times">${esc(d.sleepNotes)}</textarea></div>
+      <div class="form-row"><label>Potty Training Notes</label><textarea id="f-pottyNotes" placeholder="Current status and needs">${esc(d.pottyNotes)}</textarea></div>
+      <div class="form-row"><label>Current Providers</label><textarea id="f-providers" placeholder="Names, agencies, contacts">${esc(d.providers)}</textarea></div>`;
+  }
+
+  if (type === 'appointment') return `
+    <div class="form-row-2">
+      <div class="form-row"><label>Appointment Type *</label><input id="f-type" value="${v('type')}" placeholder="E.g. Speech Therapy"/></div>
+      <div class="form-row"><label>Provider Name *</label><input id="f-provider" value="${v('provider')}" placeholder="E.g. Dr. Smith"/></div>
+    </div>
+    <div class="form-row"><label>Date & Time *</label><input type="datetime-local" id="f-datetime" value="${v('datetime', today+'T09:00')}"/></div>
+    <div class="form-row"><label>Location</label><input id="f-location" value="${v('location')}" placeholder="Address or Telehealth"/></div>
+    <div class="form-row"><label>Notes</label><textarea id="f-notes" placeholder="Any notes about this appointment">${v('notes')}</textarea></div>
+    <div class="form-row"><label>Questions to Ask</label><textarea id="f-questions" placeholder="Questions you want to ask the provider">${v('questions')}</textarea></div>
+    <div class="form-row" style="display:flex;align-items:center;gap:.6rem">
+      <input type="checkbox" id="f-followup" ${r.followup ? 'checked' : ''} style="width:auto"/>
+      <label for="f-followup" style="margin:0;font-weight:500">Follow-up needed</label>
+    </div>`;
+
+  if (type === 'therapy') return `
+    <div class="form-row-2">
+      <div class="form-row"><label>Therapy Type *</label>
+        <select id="f-type">
+          ${['ABA','OT','Speech','PT','Other'].map(t=>`<option ${v('type')===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Date *</label><input type="date" id="f-date" value="${v('date', today)}"/></div>
+    </div>
+    <div class="form-row"><label>Provider</label><input id="f-provider" value="${v('provider')}" placeholder="Therapist name"/></div>
+    <div class="form-row"><label>Goals Worked On</label><textarea id="f-goals" placeholder="Skills, targets addressed">${v('goals')}</textarea></div>
+    <div class="form-row"><label>What Went Well</label><textarea id="f-wentWell" placeholder="Wins and positives">${v('wentWell')}</textarea></div>
+    <div class="form-row"><label>What Was Hard</label><textarea id="f-wasHard" placeholder="Challenges and areas of concern">${v('wasHard')}</textarea></div>
+    <div class="form-row"><label>Parent Homework / Carryover</label><textarea id="f-homework" placeholder="What to practice at home">${v('homework')}</textarea></div>
+    <div class="form-row"><label>Next Steps</label><textarea id="f-nextSteps" placeholder="Plan for next session">${v('nextSteps')}</textarea></div>`;
+
+  if (type === 'behavior') return `
+    <div class="form-row-2">
+      <div class="form-row"><label>Date & Time *</label><input type="datetime-local" id="f-datetime" value="${v('datetime', today+'T12:00')}"/></div>
+      <div class="form-row"><label>Duration</label><input id="f-duration" value="${v('duration')}" placeholder="E.g. 10 minutes"/></div>
+    </div>
+    <div class="form-row"><label>Antecedent – What happened BEFORE?</label><textarea id="f-antecedent" placeholder="E.g. Transition from playground to classroom">${v('antecedent')}</textarea></div>
+    <div class="form-row"><label>Behavior – What happened?</label><textarea id="f-behavior" placeholder="Describe what the behavior looked like">${v('behavior')}</textarea></div>
+    <div class="form-row"><label>Consequence / Response – What happened AFTER?</label><textarea id="f-consequence" placeholder="E.g. Given a break, redirected, used calm-down corner">${v('consequence')}</textarea></div>
+    <div class="form-row-2">
+      <div class="form-row"><label>Possible Trigger</label><input id="f-trigger" value="${v('trigger')}" placeholder="E.g. noise, transition, hunger"/></div>
+      <div class="form-row"><label>Intensity (1–5)</label>
+        <select id="f-intensity">
+          <option value="">Select…</option>
+          ${[1,2,3,4,5].map(n=>`<option ${v('intensity')==n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row"><label>Calming Strategy Used</label><input id="f-calming" value="${v('calming')}" placeholder="E.g. weighted blanket, quiet corner, deep pressure"/></div>
+    <div class="form-row"><label>Notes</label><textarea id="f-notes">${v('notes')}</textarea></div>`;
+
+  if (type === 'communication') return `
+    <div class="form-row"><label>Date *</label><input type="date" id="f-date" value="${v('date', today)}"/></div>
+    <div class="form-row"><label>New Words / Sounds / Signs / Gestures</label><textarea id="f-words" placeholder="E.g. Said 'more' spontaneously, new sign for 'water'">${v('words')}</textarea></div>
+    <div class="form-row"><label>AAC / Communication Card Usage</label><textarea id="f-aac" placeholder="E.g. Used PECS to request snack, typed on talker">${v('aac')}</textarea></div>
+    <div class="form-row"><label>Requests Made</label><textarea id="f-requests" placeholder="What did they ask for and how?">${v('requests')}</textarea></div>
+    <div class="form-row"><label>Eye Contact / Social Interaction</label><textarea id="f-social" placeholder="Notable social moments">${v('social')}</textarea></div>
+    <div class="form-row"><label>Imitation</label><textarea id="f-imitation" placeholder="Actions, sounds, or words imitated">${v('imitation')}</textarea></div>
+    <div class="form-row"><label>🌟 Wins of the Day</label><textarea id="f-wins" placeholder="Celebrate everything, big and small!">${v('wins')}</textarea></div>`;
+
+  if (type === 'dailylog') return `
+    <div class="form-row-2">
+      <div class="form-row"><label>Date *</label><input type="date" id="f-date" value="${v('date', today)}"/></div>
+      <div class="form-row"><label>Overall Mood</label>
+        <select id="f-mood">
+          <option value="">Select…</option>
+          ${['great','good','okay','hard','very hard'].map(m=>`<option ${v('mood')===m?'selected':''}>${m}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row"><label>Sleep</label><textarea id="f-sleep" placeholder="Bedtime, wake time, quality">${v('sleep')}</textarea></div>
+    <div class="form-row"><label>Meals / Food</label><textarea id="f-meals" placeholder="What they ate, refusals, wins">${v('meals')}</textarea></div>
+    <div class="form-row"><label>Bathroom / Potty</label><textarea id="f-potty" placeholder="Successes, accidents, patterns">${v('potty')}</textarea></div>
+    <div class="form-row"><label>Sensory Issues</label><textarea id="f-sensory" placeholder="Seeking, avoiding, meltdowns">${v('sensory')}</textarea></div>
+    <div class="form-row"><label>Major Routine Changes</label><textarea id="f-routineChange" placeholder="Anything different about the day?">${v('routineChange')}</textarea></div>
+    <div class="form-row"><label>Parent Notes</label><textarea id="f-notes" placeholder="Anything else worth remembering">${v('notes')}</textarea></div>`;
+
+  if (type === 'document') return `
+    <div class="form-row"><label>Document Name *</label><input id="f-name" value="${v('name')}" placeholder="E.g. Occupational Therapy Evaluation 2024"/></div>
+    <div class="form-row-2">
+      <div class="form-row"><label>Type</label>
+        <select id="f-type">
+          <option value="">Select…</option>
+          ${['Diagnosis Report','IEP/IFSP','Therapy Evaluation','Insurance Letter','Medicaid/Vaya','Doctor Notes','Other'].map(t=>`<option ${v('type')===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row"><label>Date</label><input type="date" id="f-date" value="${v('date', today)}"/></div>
+    </div>
+    <div class="form-row"><label>Where Is It Stored? <span style="font-weight:400;color:var(--text-3)">(physical location or folder)</span></label>
+      <input id="f-location" value="${v('location')}" placeholder="E.g. Blue binder, Google Drive, doctor's office"/>
+    </div>
+    <div class="form-row"><label>Notes</label><textarea id="f-notes" placeholder="Anything important about this document">${v('notes')}</textarea></div>
+    <div class="form-section-title">Attach Files</div>
+    <div class="drop-zone" id="drop-zone"
+         onclick="document.getElementById('f-files').click()"
+         ondragover="dzDragOver(event)" ondragleave="dzDragLeave(event)" ondrop="dzDrop(event)">
+      <span class="dz-icon">📎</span>
+      <p><strong>Tap to choose files</strong> or drag &amp; drop here</p>
+      <p style="font-size:.75rem;color:var(--text-3)">PDFs, images, Word, Excel — any file type</p>
+      <input type="file" id="f-files" multiple accept="*/*" onchange="dzFilePicked(this.files)"/>
+    </div>
+    <div id="file-preview-list"></div>
+    ${(r.fileIds||[]).length ? `
+      <div class="form-section-title">Existing Attachments</div>
+      <div id="existing-files-list">
+        ${(r.fileIds||[]).map(fid=>`<div class="file-preview" id="efp-${fid}">
+          <span class="fp-icon">⏳</span>
+          <div class="fp-info"><div class="fp-name">Loading…</div></div>
+          <button class="fp-remove" onclick="removeExistingFile('${fid}','${r.id||''}')" title="Remove">✕</button>
+        </div>`).join('')}
+      </div>` : ''}
+  `;
+
+  return '<p>Unknown form type.</p>';
+}
+
+/* ─── Save modal ─── */
+
+function saveModal() {
+  const d = getData();
+
+  if (modalType === 'profile') {
+    d.profile = {
+      name: val('f-name'), age: val('f-age'), diagnosisNotes: val('f-diagnosisNotes'),
+      supportLevel: val('f-supportLevel'), communicationLevel: val('f-communicationLevel'),
+      sensoryPrefs: val('f-sensoryPrefs'), calmingTools: val('f-calmingTools'),
+      knownTriggers: val('f-knownTriggers'), foodConcerns: val('f-foodConcerns'),
+      sleepNotes: val('f-sleepNotes'), pottyNotes: val('f-pottyNotes'), providers: val('f-providers')
+    };
+    saveData(d); closeModal(true); renderProfile(); updateChildBadge();
+    toast('Profile saved!'); return;
+  }
+
+  const map = { appointment:'appointments', therapy:'therapy', behavior:'behavior',
+    communication:'communication', dailylog:'dailylog', document:'documents' };
+  const listKey = map[modalType];
+  if (!listKey) return;
+
+  let rec = {};
+
+  if (modalType === 'appointment') {
+    rec = { type:val('f-type'), provider:val('f-provider'), datetime:val('f-datetime'),
+            location:val('f-location'), notes:val('f-notes'), questions:val('f-questions'),
+            followup:checked('f-followup') };
+    if (!rec.type || !rec.provider || !rec.datetime) { toast('⚠️ Please fill in Type, Provider, and Date/Time.'); return; }
+  }
+  else if (modalType === 'therapy') {
+    rec = { type:val('f-type'), date:val('f-date'), provider:val('f-provider'),
+            goals:val('f-goals'), wentWell:val('f-wentWell'), wasHard:val('f-wasHard'),
+            homework:val('f-homework'), nextSteps:val('f-nextSteps') };
+    if (!rec.date) { toast('⚠️ Please add a date.'); return; }
+  }
+  else if (modalType === 'behavior') {
+    rec = { datetime:val('f-datetime'), duration:val('f-duration'), antecedent:val('f-antecedent'),
+            behavior:val('f-behavior'), consequence:val('f-consequence'), trigger:val('f-trigger'),
+            intensity:val('f-intensity'), calming:val('f-calming'), notes:val('f-notes') };
+    if (!rec.datetime) { toast('⚠️ Please add a date/time.'); return; }
+  }
+  else if (modalType === 'communication') {
+    rec = { date:val('f-date'), words:val('f-words'), aac:val('f-aac'),
+            requests:val('f-requests'), social:val('f-social'), imitation:val('f-imitation'), wins:val('f-wins') };
+    if (!rec.date) { toast('⚠️ Please add a date.'); return; }
+  }
+  else if (modalType === 'dailylog') {
+    rec = { date:val('f-date'), mood:val('f-mood'), sleep:val('f-sleep'),
+            meals:val('f-meals'), potty:val('f-potty'), sensory:val('f-sensory'),
+            routineChange:val('f-routineChange'), notes:val('f-notes') };
+    if (!rec.date) { toast('⚠️ Please add a date.'); return; }
+  }
+  else if (modalType === 'document') {
+    // Document save is handled async by saveDocumentModal()
+    saveDocumentModal();
+    return;
+  }
+
+  if (modalEditId) {
+    // Update existing
+    const idx = d[listKey].findIndex(r => r.id === modalEditId);
+    if (idx > -1) { d[listKey][idx] = { ...d[listKey][idx], ...rec }; }
+  } else {
+    // New record
+    rec.id = uid();
+    rec.createdAt = new Date().toISOString();
+    d[listKey].push(rec);
+  }
+
+  saveData(d);
+  closeModal(true);
+  renderPage(currentPage);
+  toast('Saved! ✅');
+}
+
+/* ══════════════════════════════════════════════════════
+   DELETE
+══════════════════════════════════════════════════════ */
+
+function deleteRecord(listKey, id) {
+  if (!confirm('Delete this entry? This cannot be undone.')) return;
+  const d = getData();
+  d[listKey] = d[listKey].filter(r => r.id !== id);
+  saveData(d);
+  renderPage(currentPage);
+  toast('Deleted.');
+}
+
+async function deleteDocument(id) {
+  if (!confirm('Delete this document and all its attached files? This cannot be undone.')) return;
+  const d = getData();
+  const doc = d.documents.find(r => r.id === id);
+  if (doc && doc.fileIds) {
+    for (const fid of doc.fileIds) {
+      await idbDeleteFile(fid);
+    }
+  }
+  d.documents = d.documents.filter(r => r.id !== id);
+  saveData(d);
+  renderDocuments();
+  toast('Document deleted.');
+}
+
+/* ══════════════════════════════════════════════════════
+   BACKUP TRANSFER SYSTEM  (v1.1)
+   ─ Export: metadata + all IDB files embedded as base64
+   ─ Import: two-step (preview → confirm), then full reload
+   ─ Last backup timestamp stored in localStorage
+   ─ Works on Windows / Mac / Chromebook / iPad Safari+Chrome
+══════════════════════════════════════════════════════ */
+
+const APP_NAME    = 'Autism Care Dashboard';
+const APP_VERSION = '1.1';
+const BACKUP_TS_KEY = 'acd_last_backup'; // localStorage key for last backup time
+
+// ── Render last-backup timestamp in the settings page ──
+function renderLastBackup() {
+  const el = document.getElementById('last-backup-text');
+  if (!el) return;
+  const ts = localStorage.getItem(BACKUP_TS_KEY);
+  if (!ts) {
+    el.textContent = 'No backup created yet in this browser.';
+    return;
+  }
+  const d = new Date(ts);
+  el.textContent = `Last backup: ${d.toLocaleDateString('en-US', {
+    weekday:'long', year:'numeric', month:'long', day:'numeric'
+  })} at ${d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' })}`;
+}
+
+// ── EXPORT ──────────────────────────────────────────────
+async function exportData() {
+  const exportBtn  = document.getElementById('export-btn');
+  const progressEl = document.getElementById('export-progress');
+
+  if (exportBtn)  exportBtn.disabled = true;
+  if (progressEl) progressEl.style.display = 'inline-flex';
+
+  try {
+    const d = getData();
+
+    // Fix 14: Calculate size estimate before building
+    const keys = await idbListFileKeys();
+    let fileBytes = 0;
+    for (const k of keys) {
+      const f = await idbGetFile(k);
+      if (f && f.size) fileBytes += f.size;
+    }
+    const lsBytes = new Blob([localStorage.getItem(STORE_KEY)||'']).size;
+    const estTotal = fileBytes + lsBytes;
+    if (estTotal > 20 * 1024 * 1024) {
+      if (!confirm(`Estimated backup size: ~${fmtBytes(estTotal)}. This may take a moment and produce a large file. Continue?`)) return;
+    }
+    if (progressEl) progressEl.textContent = `⏳ Building backup (~${fmtBytes(estTotal)})…`;
+
+    const fileMap = {};
+    for (const k of keys) {
+      const f = await idbGetFile(k);
+      if (f) fileMap[k] = f;
+    }
+
+    const now = new Date();
+    const exportObj = {
+      _meta: {
+        app:       APP_NAME,
+        version:   APP_VERSION,
+        exportedAt: now.toISOString(),
+        exportedAtReadable: now.toLocaleString('en-US', {
+          weekday:'long', year:'numeric', month:'long',
+          day:'numeric', hour:'numeric', minute:'2-digit'
+        }),
+        recordCounts: {
+          appointments:  d.appointments.length,
+          therapy:       d.therapy.length,
+          behavior:      d.behavior.length,
+          communication: d.communication.length,
+          dailylog:      d.dailylog.length,
+          documents:     d.documents.length,
+          attachedFiles: keys.length
+        }
+      },
+      ...d,
+      _files: fileMap
+    };
+
+    const json     = JSON.stringify(exportObj);
+    const blob     = new Blob([json], { type: 'application/json' });
+    const filename = `Autism-Care-Backup-${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.json`;
+
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
+
+    localStorage.setItem(BACKUP_TS_KEY, now.toISOString());
+    renderLastBackup();
+    toast(`Backup downloaded! (~${fmtBytes(blob.size)}) ✅`);
+  } catch(err) {
+    toast('⚠️ Export failed: ' + err.message, 6000);
+  } finally {
+    // Fix 6: always re-enable button even on failure
+    if (exportBtn)  exportBtn.disabled = false;
+    if (progressEl) { progressEl.style.display = 'none'; progressEl.textContent = '⏳ Building backup…'; }
+  }
+}
+
+// ── IMPORT — Step 1: file chosen, show preview ──────────
+let _importParsed = null; // holds parsed backup between steps
+
+function importFileChosen(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  // Show filename next to button
+  const nameEl = document.getElementById('import-filename');
+  if (nameEl) nameEl.textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const parsed = JSON.parse(e.target.result);
+
+      // Validate — must have profile and appointments at minimum
+      if (!parsed.profile || !Array.isArray(parsed.appointments)) {
+        toast('⚠️ This doesn\'t look like a valid backup file.');
+        cancelImport();
+        return;
+      }
+
+      _importParsed = parsed;
+
+      // Build preview card
+      const meta   = parsed._meta || {};
+      const counts = meta.recordCounts || {};
+      const dateStr = meta.exportedAtReadable
+        || (meta.exportedAt ? new Date(meta.exportedAt).toLocaleString() : 'Unknown date');
+
+      const rows = [
+        ['App',         meta.app     || APP_NAME],
+        ['Version',     meta.version || 'Unknown'],
+        ['Backed up',   dateStr],
+        ['Appointments', counts.appointments ?? parsed.appointments.length],
+        ['Therapy notes', counts.therapy     ?? parsed.therapy?.length ?? 0],
+        ['Behavior logs', counts.behavior    ?? parsed.behavior?.length ?? 0],
+        ['Comm entries',  counts.communication ?? parsed.communication?.length ?? 0],
+        ['Daily logs',    counts.dailylog     ?? parsed.dailylog?.length ?? 0],
+        ['Documents',     counts.documents    ?? parsed.documents?.length ?? 0],
+        ['Attached files', counts.attachedFiles ?? Object.keys(parsed._files||{}).length],
+      ];
+
+      document.getElementById('import-preview-body').innerHTML =
+        rows.map(([l,v]) =>
+          `<div style="display:flex;gap:.5rem;">
+            <span style="color:var(--text-3);min-width:130px;">${l}:</span>
+            <strong>${esc(String(v))}</strong>
+          </div>`
+        ).join('');
+
+      document.getElementById('import-preview').style.display = 'block';
+    } catch(err) {
+      toast('⚠️ Could not read file: ' + err.message);
+      cancelImport();
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── IMPORT — Step 2: confirmed, restore and reload ──────
+async function confirmImport() {
+  if (!_importParsed) return;
+
+  const btn = document.getElementById('import-confirm-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Restoring…'; }
+
+  try {
+    const parsed = _importParsed;
+
+    // Fix 2: clear existing IDB files first so orphaned files don't accumulate
+    await idbClearAll();
+
+    // Restore IDB files from backup
+    if (parsed._files && typeof parsed._files === 'object') {
+      for (const [fid, fdata] of Object.entries(parsed._files)) {
+        await idbSaveFile(fid, fdata);
+      }
+    }
+
+    // Strip internal keys before saving to localStorage
+    const toSave = { ...parsed };
+    delete toSave._meta;
+    delete toSave._files;
+
+    saveData(toSave);
+    _importParsed = null;
+
+    toast('✅ Backup restored! Reloading dashboard…', 2500);
+
+    // Reload after a short pause so the toast is readable
+    setTimeout(() => window.location.reload(), 2000);
+  } catch(err) {
+    toast('⚠️ Restore failed: ' + err.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Restore This Backup'; }
+  }
+}
+
+// ── IMPORT — cancel / reset ──────────────────────────────
+function cancelImport() {
+  _importParsed = null;
+  const previewEl  = document.getElementById('import-preview');
+  const filenameEl = document.getElementById('import-filename');
+  const inputEl    = document.getElementById('import-file-input');
+  if (previewEl)  previewEl.style.display = 'none';
+  if (filenameEl) filenameEl.textContent  = 'No file chosen';
+  if (inputEl)    inputEl.value           = ''; // reset so same file can be re-chosen
+}
+
+// ── CLEAR ────────────────────────────────────────────────
+async function confirmClear() {
+  if (!confirm('⚠️ Delete ALL data and uploaded files?\n\nThis cannot be undone. Export a backup first if you want to keep anything.')) return;
+  if (!confirm('Final check: really delete everything?')) return;
+  localStorage.removeItem(STORE_KEY);
+  localStorage.removeItem(BACKUP_TS_KEY);
+  await idbClearAll();
+  toast('All data cleared.');
+  setTimeout(() => window.location.reload(), 1200);
+}
+
+/* ══════════════════════════════════════════════════════
+   UTILITIES
+══════════════════════════════════════════════════════ */
+
+// Escape HTML to prevent XSS
+function esc(str) {
+  if (!str && str !== 0) return '';
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function todayStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s + 'T12:00:00'); // noon to avoid timezone shifts
+  return d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+}
+
+function fmtDateTime(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  return d.toLocaleString('en-US', { weekday:'short', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
+}
+
+function startOfWeek(d) {
+  const dt = new Date(d); dt.setDate(dt.getDate() - dt.getDay()); dt.setHours(0,0,0,0); return dt;
+}
+function endOfWeek(d) {
+  const dt = new Date(d); dt.setDate(dt.getDate() - dt.getDay() + 6); dt.setHours(23,59,59,999); return dt;
+}
+function sameWeek(a, b) { return a >= startOfWeek(b) && a <= endOfWeek(b); }
+
+function countBy(arr, key) {
+  const counts = {};
+  arr.forEach(item => {
+    const v = (item[key]||'').trim();
+    if (v) counts[v] = (counts[v]||0) + 1;
+  });
+  return counts;
+}
+
+function intensityHtml(n) {
+  if (!n) return '';
+  const dots = Array.from({length:5}, (_,i) => `<span class="${i < n ? 'on' : ''}"></span>`).join('');
+  return `<span class="intensity">${dots}</span>`;
+}
+
+function emptyState(icon, msg) {
+  return `<div class="empty-state"><div class="es-icon">${icon}</div><p>${msg}</p></div>`;
+}
+
+function toast(msg, duration) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration || 2800);
+}
+
+/* ══════════════════════════════════════════════════════
+   INDEXEDDB LAYER
+   DB name: "acd_files"  |  Store: "files"
+   Each record: { id (key), name, mimeType, size, dataUrl }
+══════════════════════════════════════════════════════ */
+
+const IDB_NAME    = 'acd_files';
+const IDB_STORE   = 'files';
+const IDB_VERSION = 1;
+let _idb = null; // cached db connection
+
+function idbOpen() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+    req.onupgradeneeded = e => {
+      e.target.result.createObjectStore(IDB_STORE, { keyPath: 'id' });
+    };
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function idbSaveFile(id, fileObj) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put({ id, ...fileObj });
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function idbGetFile(id) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(id);
+    req.onsuccess = e => resolve(e.target.result || null);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function idbDeleteFile(id) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+async function idbListFileKeys() {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).getAllKeys();
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+async function idbClearAll() {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).clear();
+    tx.oncomplete = resolve;
+    tx.onerror    = e => reject(e.target.error);
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   DRAG-AND-DROP + FILE PICKER HELPERS
+══════════════════════════════════════════════════════ */
+
+// Staged files waiting to be saved (reset each time modal opens)
+let _pendingFiles = []; // [ { id, name, mimeType, size, dataUrl } ]
+
+function dzDragOver(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.add('drag-over');
+}
+function dzDragLeave(e) {
+  document.getElementById('drop-zone').classList.remove('drag-over');
+}
+function dzDrop(e) {
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  dzFilePicked(e.dataTransfer.files);
+}
+
+const MAX_FILE_SIZE    = 50 * 1024 * 1024; // 50 MB hard limit
+const WARN_FILE_SIZE   = 10 * 1024 * 1024; // 10 MB soft warning
+
+function dzFilePicked(fileList) {
+  Array.from(fileList).forEach(file => {
+    // Fix 5: hard reject files over 50MB
+    if (file.size > MAX_FILE_SIZE) {
+      toast(`⚠️ "${file.name}" is ${fmtBytes(file.size)} — too large to store (50MB max). Consider compressing it first.`, 6000);
+      return;
+    }
+    // Soft warning for large files
+    if (file.size > WARN_FILE_SIZE) {
+      if (!confirm(`"${file.name}" is ${fmtBytes(file.size)}. Large files use more storage. Continue?`)) return;
+    }
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      const entry = {
+        id:       uid(),
+        name:     file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size:     file.size,
+        dataUrl:  ev.target.result
+      };
+      _pendingFiles.push(entry);
+      renderFilePreviewList();
+    };
+    reader.onerror = function() {
+      toast(`⚠️ Could not read "${file.name}". Try again.`, 4000);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderFilePreviewList() {
+  const container = document.getElementById('file-preview-list');
+  if (!container) return;
+  container.innerHTML = _pendingFiles.map((f, i) => `
+    <div class="file-preview">
+      <span class="fp-icon">${fileIcon(f.mimeType)}</span>
+      <div class="fp-info">
+        <div class="fp-name">${esc(f.name)}</div>
+        <div class="fp-size">${fmtBytes(f.size)} · Ready to save</div>
+      </div>
+      <button class="fp-remove" onclick="removePending(${i})" title="Remove">✕</button>
+    </div>`).join('');
+}
+
+function removePending(i) {
+  _pendingFiles.splice(i, 1);
+  renderFilePreviewList();
+}
+
+// Remove a file that was already saved in a previous edit
+async function removeExistingFile(fid, docId) {
+  if (!confirm('Remove this file from the document?')) return;
+  await idbDeleteFile(fid);
+  // Update metadata
+  const d = getData();
+  const doc = d.documents.find(r => r.id === docId);
+  if (doc) {
+    doc.fileIds = (doc.fileIds||[]).filter(id => id !== fid);
+    saveData(d);
+  }
+  const el = document.getElementById('efp-' + fid);
+  if (el) el.remove();
+  toast('File removed.');
+}
+
+/* Load existing-file rows in the edit modal */
+async function loadExistingFilePreviews(fileIds) {
+  for (const fid of fileIds) {
+    const f = await idbGetFile(fid);
+    const el = document.getElementById('efp-' + fid);
+    if (!el || !f) continue;
+    el.innerHTML = `
+      <span class="fp-icon">${fileIcon(f.mimeType)}</span>
+      <div class="fp-info">
+        <div class="fp-name">${esc(f.name)}</div>
+        <div class="fp-size">${fmtBytes(f.size)}</div>
+      </div>
+      <button class="fp-remove" onclick="removeExistingFile('${fid}','${f.docId||''}')" title="Remove">✕</button>`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   ASYNC DOCUMENT SAVE
+══════════════════════════════════════════════════════ */
+
+async function saveDocumentModal() {
+  const name = val('f-name');
+  if (!name) { toast('⚠️ Document name is required.'); return; }
+
+  const saveBtn = document.getElementById('modal-save');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+
+  try {
+    const newFileIds = [];
+    for (const f of _pendingFiles) {
+      await idbSaveFile(f.id, f);
+      newFileIds.push(f.id);
+    }
+
+    const d = getData();
+    const rec = {
+      name,
+      type:     val('f-type'),
+      date:     val('f-date'),
+      location: val('f-location'),
+      notes:    val('f-notes')
+    };
+
+    if (modalEditId) {
+      const idx = d.documents.findIndex(r => r.id === modalEditId);
+      if (idx > -1) {
+        const existing = d.documents[idx].fileIds || [];
+        d.documents[idx] = { ...d.documents[idx], ...rec, fileIds: [...existing, ...newFileIds] };
+      }
+    } else {
+      rec.id        = uid();
+      rec.createdAt = new Date().toISOString();
+      rec.fileIds   = newFileIds;
+      d.documents.push(rec);
+    }
+
+    saveData(d);
+    _pendingFiles = [];
+
+    // Re-enable button BEFORE closing so it's clean for next open
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+
+    closeModal(true);
+    renderDocuments();
+    toast('Document saved! ✅');
+  } catch(err) {
+    toast('⚠️ Error saving: ' + err.message);
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+  }
+}
+
+/* ══════════════════════════════════════════════════════
+   FILE DOWNLOAD + LIGHTBOX
+══════════════════════════════════════════════════════ */
+
+async function downloadFile(fid) {
+  const f = await idbGetFile(fid);
+  if (!f) { toast('⚠️ File not found.'); return; }
+  const a = document.createElement('a');
+  a.href     = f.dataUrl;
+  a.download = f.name;
+  a.click();
+}
+
+async function openLightbox(fid) {
+  const f = await idbGetFile(fid);
+  if (!f || !f.mimeType.startsWith('image/')) return;
+  document.getElementById('lightbox-img').src = f.dataUrl;
+  document.getElementById('lightbox').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightbox-img').src = '';
+  document.body.style.overflow = '';
+}
+
+/* ══════════════════════════════════════════════════════
+   BOOT
+══════════════════════════════════════════════════════ */
+
+(function boot() {
+  updateChildBadge();
+  renderHome();
+
+  // Fix 7: Offline/online detection
+  function setOfflineState(isOffline) {
+    const banner = document.getElementById('offline-banner');
+    if (banner) banner.classList.toggle('show', isOffline);
+    // Disable Drive buttons when offline
+    ['gd-update-btn','gd-newver-btn','gd-load-btn','gd-signin-btn','gd-test-btn'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.disabled = isOffline;
+        el.title    = isOffline ? 'Unavailable while offline' : '';
+      }
+    });
+  }
+  window.addEventListener('offline', () => setOfflineState(true));
+  window.addEventListener('online',  () => { setOfflineState(false); toast('Back online ✅'); });
+  if (!navigator.onLine) setOfflineState(true);
+})();
+</script>
+<!-- Google Identity Services — loaded with onload callback for reliability -->
+<script>
+(function() {
+  var s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.onload = function() {
+    console.log('GIS script loaded successfully');
+    if (typeof gdriveInit === 'function') gdriveInit();
+  };
+  s.onerror = function() {
+    console.warn('GIS script failed to load — Drive sync unavailable');
+    var notice = document.getElementById('gd-iframe-notice');
+    if (notice) {
+      notice.style.display = 'block';
+      notice.innerHTML = '⚠️ <strong>Could not load Google sign-in.</strong> Make sure you are connected to the internet and using the launcher. If this keeps happening, try opening Chrome, going to <strong>chrome://settings/cookies</strong> and making sure third-party cookies are not fully blocked.';
+    }
+    var statusText = document.getElementById('gd-status-text');
+    if (statusText) statusText.textContent = 'Google sign-in unavailable — check internet connection';
+  };
+  document.head.appendChild(s);
+})();
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════
+   GOOGLE DRIVE SYNC  – v1.1
+   Uses Google Identity Services (GIS) token model.
+   No backend required. OAuth token lives in memory only
+   (never stored to disk). Scopes: drive.file only —
+   the app can only see files IT created, nothing else
+   in the user's Drive.
+══════════════════════════════════════════════════════ */
+
+const GD_CLIENT_ID  = '403391174088-jvembo86rl0rtiiip1tvua3f5bi6plva.apps.googleusercontent.com';
+const GD_SCOPE      = 'https://www.googleapis.com/auth/drive.file';
+const GD_FOLDER     = 'Autism Care Dashboard';
+const GD_MASTER     = 'Autism-Care-Master.json';
+const GD_SYNC_KEY   = 'acd_gdrive_sync';
+
+let _gdToken        = null;
+let _gdTokenExpiry  = 0;     // Fix 4: Unix ms when token expires
+let _gdFolderId     = null;
+let _gdMasterFileId = null;
+let _gdTokenClient  = null;
+
+// ── Initialise GIS when the script loads ──────────────
+function gdriveInit() {
+  // Detect sandboxed iframe (Claude preview, etc.) — window.origin is 'null'
+  // or we're inside an iframe on a different origin.
+  // localhost via the batch launcher is always valid.
+  const isLocalhost = window.location.hostname === 'localhost'
+    || window.location.hostname === '127.0.0.1';
+  const inSandbox = !isLocalhost && (
+    window.location.origin === 'null' || window.location.protocol === 'null:'
+  ) && (window !== window.top);
+
+  if (inSandbox) {
+    const notice = document.getElementById('gd-iframe-notice');
+    if (notice) notice.style.display = 'block';
+    _gdSetStatus(false, 'Not available in preview — open the saved file in Chrome');
+    return;
+  }
+
+  if (!window.google || !window.google.accounts) {
+    // GIS not loaded yet (offline or blocked) — retry a few times
+    if ((gdriveInit._tries = (gdriveInit._tries || 0) + 1) < 8) {
+      setTimeout(gdriveInit, 800);
+    } else {
+      // Give up — show the notice
+      const notice = document.getElementById('gd-iframe-notice');
+      if (notice) notice.style.display = 'block';
+      _gdSetStatus(false, 'Google sign-in unavailable — check your internet connection');
+    }
+    return;
+  }
+
+  _gdTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GD_CLIENT_ID,
+    scope:     GD_SCOPE,
+    callback:  _gdTokenCallback,
+  });
+  // Restore last-sync display if we have it
+  _gdRenderSyncLine();
+}
+
+// Called by GIS after the user authorises (or token refresh)
+function _gdTokenCallback(resp) {
+  if (resp.error) {
+    _gdSetStatus(false, 'Sign-in failed: ' + resp.error);
+    return;
+  }
+  _gdToken       = resp.access_token;
+  // Fix 4: record expiry (tokens last 3600s; refresh 5min early)
+  _gdTokenExpiry = Date.now() + ((resp.expires_in || 3600) - 300) * 1000;
+  _gdSetStatus(true, 'Signed in to Google');
+  _gdShowButtons(true);
+  if (_gdPendingAction) { const fn = _gdPendingAction; _gdPendingAction = null; fn(); }
+}
+
+let _gdPendingAction = null;
+
+// Fix 4: Check token is still fresh before any Drive operation; silently refresh if needed
+async function _gdEnsureFreshToken() {
+  if (!_gdToken) throw new Error('Not signed in to Google. Please sign in first.');
+  if (Date.now() >= _gdTokenExpiry) {
+    // Token expired — request a new one silently (no popup if already consented)
+    return new Promise((resolve, reject) => {
+      const original = _gdTokenClient.__callback;
+      _gdTokenClient.callback = function(resp) {
+        if (resp.error) { reject(new Error('Token refresh failed: ' + resp.error)); return; }
+        _gdToken       = resp.access_token;
+        _gdTokenExpiry = Date.now() + ((resp.expires_in || 3600) - 300) * 1000;
+        resolve();
+      };
+      _gdTokenClient.requestAccessToken({ prompt: '' });
+    });
+  }
+}
+
+// ── Public: sign in ────────────────────────────────────
+function gdriveSignIn() {
+  if (!_gdTokenClient) {
+    // Check if we're in a sandbox
+    const isLocalhost = window.location.hostname === 'localhost'
+      || window.location.hostname === '127.0.0.1';
+    const inSandbox = !isLocalhost && (
+      window.location.origin === 'null' || window.location.protocol === 'null:'
+    ) && (window !== window.top);
+    if (inSandbox) {
+      alert('Google sign-in only works when the app is open as a saved file in your browser.\n\nSave "autism-care-dashboard.html" to your desktop, then open it in Chrome or Edge.');
+    } else {
+      toast('⚠️ Google sign-in is still loading. Try again in a moment.');
+      gdriveInit();
+    }
+    return;
+  }
+  // prompt:'' = silent if already consented; shows picker only first time
+  _gdTokenClient.requestAccessToken({ prompt: _gdToken ? '' : 'consent' });
+}
+
+// ── Public: sign out ───────────────────────────────────
+function gdriveSignOut() {
+  if (_gdToken) google.accounts.oauth2.revoke(_gdToken, () => {});
+  _gdToken        = null;
+  _gdFolderId     = null;
+  _gdMasterFileId = null;
+  _gdSetStatus(false, 'Signed out');
+  _gdShowButtons(false);
+}
+
+// ── Public: overwrite master file ─────────────────────
+async function gdriveSaveMaster() {
+  if (!_gdToken) { _gdPendingAction = gdriveSaveMaster; gdriveSignIn(); return; }
+  _gdBtnState(true, 'gd-update-btn', '⏳ Saving…');
+  _gdSetProgress('Checking credentials…');
+  try {
+    await _gdEnsureFreshToken();
+    const json = await _gdBuildBackupJSON();
+    _gdSetProgress('Finding or creating Drive folder…');
+    const fileId = await _gdGetOrCreateMaster();
+    _gdSetProgress('Uploading to Google Drive…');
+    await _gdUploadFile(fileId, GD_MASTER, json, true);
+    _gdSaveSyncInfo('master');
+    _gdSetProgress('');
+    toast('✅ Master file updated on Google Drive!');
+    // Show success inline too
+    _gdSetStatus(true, `✅ Synced to Drive — ${new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`);
+  } catch(e) { _gdSetProgress(''); _gdHandleError(e); }
+  finally    { _gdBtnState(false, 'gd-update-btn', '☁️ Update Master File'); }
+}
+
+// ── Public: save a new dated version ──────────────────
+async function gdriveSaveNewVersion() {
+  if (!_gdToken) { _gdPendingAction = gdriveSaveNewVersion; gdriveSignIn(); return; }
+  _gdBtnState(true, 'gd-newver-btn', '⏳ Saving…');
+  _gdSetProgress('Checking credentials…');
+  try {
+    await _gdEnsureFreshToken();
+    const json     = await _gdBuildBackupJSON();
+    const now      = new Date();
+    const datePart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    const fname    = `Autism-Care-${datePart}.json`;
+    _gdSetProgress('Uploading to Google Drive…');
+    const folderId = await _gdGetOrCreateFolder();
+    await _gdUploadFile(null, fname, json, false, folderId);
+    _gdSaveSyncInfo('version', fname);
+    _gdSetProgress('');
+    toast(`✅ New version saved: ${fname}`);
+  } catch(e) { _gdSetProgress(''); _gdHandleError(e); }
+  finally    { _gdBtnState(false, 'gd-newver-btn', '📄 Save New Version'); }
+}
+
+// ── Public: load master from Drive ────────────────────
+async function gdriveLoad() {
+  if (!_gdToken) { _gdPendingAction = gdriveLoad; gdriveSignIn(); return; }
+  _gdBtnState(true, 'gd-load-btn', '⏳ Loading…');
+  try {
+    await _gdEnsureFreshToken();
+    const fileId = await _gdGetOrCreateMaster(true); // true = don't create if missing
+    if (!fileId) { toast('⚠️ No master file found on Drive yet. Save one first.'); return; }
+
+    const resp = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+      { headers: { Authorization: 'Bearer ' + _gdToken } }
+    );
+    if (!resp.ok) throw new Error('Download failed: ' + resp.status);
+    const parsed = await resp.json();
+
+    if (!parsed.profile || !Array.isArray(parsed.appointments)) {
+      toast('⚠️ The Drive file doesn\'t look like a valid backup.'); return;
+    }
+
+    // Show a preview confirm before overwriting
+    const meta   = parsed._meta || {};
+    const counts = meta.recordCounts || {};
+    const msg    = `Load backup from Google Drive?\n\n` +
+      `Backed up: ${meta.exportedAtReadable || 'Unknown'}\n` +
+      `Appointments: ${counts.appointments ?? '?'}\n` +
+      `Therapy notes: ${counts.therapy ?? '?'}\n` +
+      `Documents: ${counts.documents ?? '?'}\n\n` +
+      `This will replace ALL current data on this device.`;
+
+    if (!confirm(msg)) return;
+
+    // Restore IDB files
+    if (parsed._files) {
+      for (const [fid, fdata] of Object.entries(parsed._files)) {
+        await idbSaveFile(fid, fdata);
+      }
+    }
+    const toSave = { ...parsed };
+    delete toSave._meta; delete toSave._files;
+    saveData(toSave);
+
+    toast('✅ Data loaded from Google Drive! Reloading…', 2500);
+    setTimeout(() => window.location.reload(), 2000);
+  } catch(e) { _gdHandleError(e); }
+  finally    { _gdBtnState(false, 'gd-load-btn', '⬇️ Load from Drive'); }
+}
+
+/* ── INTERNAL HELPERS ─────────────────────────────── */
+
+// Build the same JSON envelope as the local export
+async function _gdBuildBackupJSON() {
+  const d       = getData();
+  const fileMap = {};
+  const keys    = await idbListFileKeys();
+  for (const k of keys) {
+    const f = await idbGetFile(k);
+    if (f) fileMap[k] = f;
+  }
+  const now = new Date();
+  return JSON.stringify({
+    _meta: {
+      app: APP_NAME, version: APP_VERSION,
+      exportedAt: now.toISOString(),
+      exportedAtReadable: now.toLocaleString('en-US', {
+        weekday:'long', year:'numeric', month:'long',
+        day:'numeric', hour:'numeric', minute:'2-digit'
+      }),
+      recordCounts: {
+        appointments:  d.appointments.length,
+        therapy:       d.therapy.length,
+        behavior:      d.behavior.length,
+        communication: d.communication.length,
+        dailylog:      d.dailylog.length,
+        documents:     d.documents.length,
+        attachedFiles: keys.length
+      }
+    },
+    ...d,
+    _files: fileMap
+  });
+}
+
+// Progress line helper
+function _gdSetProgress(msg) {
+  const line = document.getElementById('gd-progress-line');
+  const txt  = document.getElementById('gd-progress-text');
+  if (!line || !txt) return;
+  if (msg) {
+    txt.textContent    = msg;
+    line.style.display = 'flex';
+  } else {
+    line.style.display = 'none';
+    txt.textContent    = '';
+  }
+}
+
+// Get or create the app folder in Drive; always placed at root so it's easy to find
+async function _gdGetOrCreateFolder() {
+  if (_gdFolderId) return _gdFolderId;
+
+  // Search for existing folder anywhere in Drive
+  const q   = `name='${GD_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const res = await _gdFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive`);
+  if (res.files && res.files.length) {
+    _gdFolderId = res.files[0].id;
+    console.log('Found existing Drive folder:', _gdFolderId);
+    return _gdFolderId;
+  }
+
+  // Create at root of Drive
+  const created = await _gdFetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    body: JSON.stringify({
+      name:     GD_FOLDER,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents:  ['root']
+    })
+  });
+  _gdFolderId = created.id;
+  console.log('Created new Drive folder:', _gdFolderId);
+  return _gdFolderId;
+}
+
+// Get master file ID (or create empty shell); noCreate = just search
+async function _gdGetOrCreateMaster(noCreate) {
+  if (_gdMasterFileId) return _gdMasterFileId;
+
+  const folderId = await _gdGetOrCreateFolder();
+  const q = `name='${GD_MASTER}' and '${folderId}' in parents and trashed=false`;
+  const res = await _gdFetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
+  if (res.files && res.files.length) {
+    _gdMasterFileId = res.files[0].id;
+    return _gdMasterFileId;
+  }
+  if (noCreate) return null;
+
+  // Create an empty placeholder so update works
+  const created = await _gdUploadFile(null, GD_MASTER, '{}', false, folderId);
+  _gdMasterFileId = created;
+  return _gdMasterFileId;
+}
+
+// Upload (create or update) a file via multipart upload
+async function _gdUploadFile(fileId, name, jsonStr, isUpdate, parentId) {
+  const boundary = 'acd_boundary_' + Date.now();
+  const folderId = parentId || (await _gdGetOrCreateFolder());
+
+  const meta = isUpdate
+    ? { name }
+    : { name, parents: [folderId] };
+
+  const body = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(meta),
+    `--${boundary}`,
+    'Content-Type: application/json',
+    '',
+    jsonStr,
+    `--${boundary}--`
+  ].join('\r\n');
+
+  const url = isUpdate
+    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart`
+    : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`;
+
+  const resp = await fetch(url, {
+    method: isUpdate ? 'PATCH' : 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + _gdToken,
+      'Content-Type':  `multipart/related; boundary=${boundary}`
+    },
+    body
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    const detail = err.error?.message || err.error?.status || '';
+    throw new Error(`Drive upload failed ${resp.status}${detail ? ': ' + detail : ''}`);
+  }
+  const result = await resp.json();
+  return result.id; // return new/updated file ID
+}
+
+// Authenticated JSON fetch helper
+async function _gdFetch(url, opts = {}) {
+  const resp = await fetch(url, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + _gdToken,
+      'Content-Type':  'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  if (resp.status === 401) {
+    // Token expired — clear it and re-prompt
+    _gdToken = null;
+    _gdSetStatus(false, 'Session expired. Please sign in again.');
+    _gdShowButtons(false);
+    throw new Error('Google session expired. Please sign in again.');
+  }
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    const detail = err.error?.message || err.error?.status || '';
+    throw new Error(`Drive API error ${resp.status}${detail ? ': ' + detail : ''}`);
+  }
+  return resp.json();
+}
+
+// Save sync timestamp to localStorage and refresh display
+function _gdSaveSyncInfo(type, filename) {
+  const info = { at: new Date().toISOString(), type, filename: filename || GD_MASTER };
+  localStorage.setItem(GD_SYNC_KEY, JSON.stringify(info));
+  _gdRenderSyncLine();
+}
+
+function _gdRenderSyncLine() {
+  const raw = localStorage.getItem(GD_SYNC_KEY);
+  const el  = document.getElementById('gd-sync-line');
+  const txt = document.getElementById('gd-sync-text');
+  if (!raw || !el || !txt) return;
+  try {
+    const info = JSON.parse(raw);
+    const d    = new Date(info.at);
+    const label = info.type === 'master' ? 'Master updated' : `Version saved (${info.filename})`;
+    txt.textContent = `Last sync: ${label} on ${d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})} at ${d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}`;
+    el.style.display = 'block';
+  } catch(e) { /* ignore parse errors in stored sync info */ }
+}
+
+function _gdSetStatus(online, msg) {
+  const dot  = document.getElementById('gd-status-dot');
+  const text = document.getElementById('gd-status-text');
+  const sout = document.getElementById('gd-signout-btn');
+  if (dot)  dot.style.background  = online ? '#34a853' : 'var(--border)';
+  if (text) text.textContent       = msg;
+  if (sout) sout.style.display     = online ? 'inline' : 'none';
+}
+
+function _gdShowButtons(signedIn) {
+  const show = (id, vis) => { const el = document.getElementById(id); if (el) el.style.display = vis ? 'inline-flex' : 'none'; };
+  show('gd-signin-btn',  !signedIn);
+  show('gd-update-btn',   signedIn);
+  show('gd-newver-btn',   signedIn);
+  show('gd-load-btn',     signedIn);
+}
+
+function _gdBtnState(disabled, id, label) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.disabled     = disabled;
+  el.textContent  = label;
+}
+
+// ── Diagnostic: run each step and report exactly what happens ──
+async function gdriveDiagnostic() {
+  const out  = document.getElementById('gd-diagnostic-output');
+  const btn  = document.getElementById('gd-test-btn');
+  if (!out) return;
+
+  out.style.display = 'block';
+  out.textContent   = '';
+  if (btn) btn.disabled = true;
+
+  function log(msg, color) {
+    const line = document.createElement('div');
+    line.style.color = color || '#d4d4d4';
+    line.textContent = msg;
+    out.appendChild(line);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  log('═══ Autism Care Dashboard — Drive Diagnostic ═══', '#569cd6');
+  log(`Time: ${new Date().toLocaleString()}`);
+  log('');
+
+  // 1. Check GIS loaded
+  log('[ 1 ] Checking Google Identity Services…');
+  if (!window.google || !window.google.accounts) {
+    log('  ✗ FAIL — Google script not loaded. Are you on localhost via the launcher?', '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+  log('  ✓ Google Identity Services loaded', '#4ec9b0');
+
+  // 2. Check token
+  log('[ 2 ] Checking access token…');
+  if (!_gdToken) {
+    log('  ✗ FAIL — No access token. Click "Sign in with Google" first.', '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+  log('  ✓ Access token present', '#4ec9b0');
+  log(`  Token preview: ${_gdToken.substring(0,20)}…`);
+
+  // 3. Test token with userinfo
+  log('[ 3 ] Verifying token with Google…');
+  try {
+    const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: 'Bearer ' + _gdToken }
+    });
+    if (!r.ok) throw new Error('Status ' + r.status);
+    const info = await r.json();
+    log(`  ✓ Token valid — signed in as: ${info.email}`, '#4ec9b0');
+  } catch(e) {
+    log(`  ✗ FAIL — Token rejected: ${e.message}`, '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+
+  // 4. Test Drive API access
+  log('[ 4 ] Testing Drive API access…');
+  try {
+    const r = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+      headers: { Authorization: 'Bearer ' + _gdToken }
+    });
+    if (r.status === 403) {
+      const err = await r.json().catch(()=>({}));
+      log(`  ✗ FAIL 403 — ${err.error?.message || 'Drive API not enabled or not authorized'}`, '#f48771');
+      log('  → Go to console.cloud.google.com → APIs & Services → Library', '#ce9178');
+      log('    Search "Google Drive API" → click Enable', '#ce9178');
+      if (btn) btn.disabled = false; return;
+    }
+    if (!r.ok) throw new Error('Status ' + r.status);
+    const info = await r.json();
+    log(`  ✓ Drive API accessible — ${info.user?.displayName || 'user OK'}`, '#4ec9b0');
+  } catch(e) {
+    log(`  ✗ FAIL — Drive API error: ${e.message}`, '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+
+  // 5. Test creating folder
+  log('[ 5 ] Creating "Autism Care Dashboard" folder…');
+  let testFolderId;
+  try {
+    _gdFolderId = null; // reset cache to force fresh attempt
+    testFolderId = await _gdGetOrCreateFolder();
+    log(`  ✓ Folder ready — ID: ${testFolderId}`, '#4ec9b0');
+  } catch(e) {
+    log(`  ✗ FAIL — Could not create folder: ${e.message}`, '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+
+  // 6. Test writing a small file
+  log('[ 6 ] Writing test file to Drive folder…');
+  let testFileId;
+  try {
+    const testJson = JSON.stringify({ test: true, time: new Date().toISOString() });
+    testFileId = await _gdUploadFile(null, '_acd_test.json', testJson, false, testFolderId);
+    log(`  ✓ Test file created — ID: ${testFileId}`, '#4ec9b0');
+  } catch(e) {
+    log(`  ✗ FAIL — Could not write file: ${e.message}`, '#f48771');
+    if (btn) btn.disabled = false; return;
+  }
+
+  // 7. Clean up test file
+  log('[ 7 ] Cleaning up test file…');
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${testFileId}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + _gdToken }
+    });
+    log('  ✓ Test file removed', '#4ec9b0');
+  } catch(e) {
+    log(`  ⚠ Could not delete test file (harmless): ${e.message}`, '#dcdcaa');
+  }
+
+  // All passed
+  log('');
+  log('══════════════════════════════════════', '#569cd6');
+  log('✅ ALL TESTS PASSED — Drive sync should work!', '#4ec9b0');
+  log('Try clicking "☁️ Update Master File" now.', '#4ec9b0');
+  log('Check drive.google.com for "Autism Care Dashboard" folder.', '#4ec9b0');
+
+  if (btn) btn.disabled = false;
+}
+
+
+function _gdHandleError(e) {
+  console.error('Google Drive error:', e);
+  var msg = (e && e.message) ? e.message : 'Unknown error';
+
+  if (msg.indexOf('expired') !== -1) {
+    _gdToken = null;
+    _gdShowButtons(false);
+  }
+
+  var hint = '';
+  if (msg.indexOf('403') !== -1 || msg.indexOf('forbidden') !== -1 || msg.indexOf('accessNotConfigured') !== -1) {
+    hint = 'Drive API may not be enabled. Go to console.cloud.google.com, APIs & Services, Library, search Google Drive API and click Enable.';
+  } else if (msg.indexOf('401') !== -1 || msg.indexOf('invalid_client') !== -1) {
+    hint = 'OAuth issue. Make sure http://localhost:8080 is in Authorized JavaScript Origins in Google Console.';
+  } else if (msg.indexOf('400') !== -1) {
+    hint = 'Make sure http://localhost:8080 is in both Authorized JavaScript Origins AND Authorized Redirect URIs in Google Console.';
+  } else {
+    hint = 'Check your internet connection and try again. You can also use Export Backup as a fallback.';
+  }
+
+  var errBox = document.getElementById('gd-error-box');
+  if (!errBox) {
+    errBox = document.createElement('div');
+    errBox.id = 'gd-error-box';
+    errBox.style.cssText = 'background:#fdecea;border:1.5px solid #f5c6c2;border-radius:8px;padding:.7rem 1rem;margin-bottom:.75rem;font-size:.82rem;color:#7a1e1e;line-height:1.6;';
+    var card = document.getElementById('gdrive-card');
+    if (card) {
+      var det = card.querySelector('details');
+      if (det) { det.parentNode.insertBefore(errBox, det); }
+      else { card.querySelector('.card > div').appendChild(errBox); }
+    }
+  }
+
+  var dismissBtn = document.createElement('button');
+  dismissBtn.textContent = 'Dismiss';
+  dismissBtn.style.cssText = 'display:block;margin-top:.5rem;font-size:.75rem;background:none;border:none;color:#a04040;cursor:pointer;text-decoration:underline;padding:0;';
+  dismissBtn.onclick = function() { errBox.style.display = 'none'; };
+
+  errBox.innerHTML = '';
+  var title = document.createElement('strong');
+  title.textContent = 'Google Drive Error: ' + msg;
+  var hintDiv = document.createElement('div');
+  hintDiv.style.marginTop = '.4rem';
+  hintDiv.textContent = hint;
+  errBox.appendChild(title);
+  errBox.appendChild(hintDiv);
+  errBox.appendChild(dismissBtn);
+  errBox.style.display = 'block';
+
+  toast('Drive error — see red box in Data & Settings', 8000);
+}
+
+
+// Boot GIS — the script tag above calls gdriveInit() via onload.
+// This fallback handles the case where the script loaded before this code ran.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', function() {
+    if (window.google && window.google.accounts) gdriveInit();
+  });
+} else {
+  if (window.google && window.google.accounts) gdriveInit();
+}
+</script>
+</body>
+</html>
